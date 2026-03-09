@@ -1,0 +1,333 @@
+---
+title: "11.DK_GP"
+author: "sss322"
+date: "2025-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+CV1: New genotypes in a known environment (post-flight, full phenomics available).
+
+## **0. Importing the dependencies**
+
+```{r}
+library(dplyr)
+library(asreml)
+library(ggplot2)
+library(ASRgenomics)
+library(readxl)
+library(MASS)
+library(tidyr)
+library(dplyr)
+library(caret)
+library(asreml)
+```
+
+
+
+
+
+## **1. Importing the phenotypic data**
+
+Importing the raw agronomic, mq and spectral 
+```{r}
+
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/NY_WMB"
+} else {
+  "~/Documents/GitHub/NY_WMB"
+}
+
+load(file.path(base_path, "data/data_ag.Rdata"))
+load(file.path(base_path, "data/data_mq.Rdata"))
+load(file.path(base_path, "data/WMB_master_geno.RData"))
+data_ag<- data_ag[,-10] %>% na.omit()
+data_mq<- data_mq[,-18] %>% na.omit()
+```
+
+
+
+
+
+## **2. Prepare data**
+
+
+```{r}
+#prep raw mat
+load(file.path(base_path, "data/MT_raw_mat.Rdata"))
+VIRC<- MT_sim_mat_raw[6:10]
+VIRS<- MT_sim_mat_raw[1:5]
+names(VIRS)<- c( "HELF24", "KET21", "MCG23","MCG25", "SNY22")
+names(VIRC)<- c("MCG25", "HELF24", "MCG23", "SNY22", "KET21")
+```
+
+
+
+```{r}
+#prep pred mat
+load(file.path(base_path, "data/MT_pred_mat.Rdata"))
+VIPC <- MT_sim_mat_pr[6:10]
+VIPS <- MT_sim_mat_pr[1:5]
+names(VIPS)<- c( "HELF24", "KET21", "MCG23","MCG25", "SNY22")
+names(VIPC)<- c("MCG25", "HELF24", "MCG23", "SNY22", "KET21")
+```
+
+
+
+## **3. G+P kernel model function**
+
+```{r}
+# CV1 double-kernel cross-validation (post-flight phenomics available)
+# - data: long table with columns Env, GID, <trait>, optionally Row/Column if you later add spatial residuals
+# - traits: character vector of response names in 'data'
+# - envs: optional subset of environments; defaults to all levels(data$Env)
+# - A1: genomic relationship matrix (GRM), row/colnames = GID
+# - VImat: named list of phenomic kernels by environment, e.g. VImat[["SNY22"]] = P_env matrix
+# - reps, folds: CV settings
+# Returns: list(results = CV rows, failures = errors)
+
+run_doublekernel_cv1 <- function(data, A1, VImat, traits,
+                                 envs = NULL, reps = 50, folds = 5,
+                                 eig.tol = 1e-3, ridge = 1e-6, scale_kernels = TRUE) {
+
+  stopifnot(all(c("Env", "GID") %in% names(data)))
+  if (is.null(envs)) {
+    if (is.factor(data$Env)) envs <- levels(data$Env) else envs <- sort(unique(data$Env))
+  }
+
+  # ---- helpers ---------------------------------------------------------------
+  scale_to_unit_trace <- function(K) {
+    tr <- sum(diag(K))
+    if (!is.finite(tr) || tr <= 0) return(K)
+    K * (nrow(K) / tr)
+  }
+
+  bend_and_inverse <- function(K, eig.tol = 1e-3, ridge = 1e-6) {
+    # light ridge (keeps names)
+    diag(K) <- diag(K) + ridge
+    Gb <- G.tuneup(G = K, bend = TRUE, eig.tol = eig.tol)$Gb
+    G.inverse(G = Gb, sparse = TRUE)$Ginv  # returns "dgCMatrix"
+  }
+
+  safe_cor <- function(x, y, method = "pearson") {
+    ok <- stats::complete.cases(x, y)
+    if (sum(ok) < 2) return(NA_real_)
+    suppressWarnings(stats::cor(x[ok], y[ok], method = method))
+  }
+
+  res_all  <- data.frame()
+  fail_log <- list()
+
+  # ---- loop ------------------------------------------------------------------
+  for (rep_run in seq_len(reps)) {
+    set.seed(1000 + rep_run)
+
+    for (tvar in traits) {
+      if (!tvar %in% names(data)) {
+        fail_log[[length(fail_log) + 1]] <- data.frame(
+          RepRun = rep_run, Trait = tvar, Env = NA, Fold = NA,
+          Stage = "precheck", Error = sprintf("Trait '%s' not in data", tvar)
+        )
+        next
+      }
+
+      for (env in envs) {
+        message(sprintf("[rep %d] Trait=%s, Env=%s", rep_run, tvar, env))
+
+        if (!env %in% names(VImat)) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "precheck", Error = sprintf("No phenomic kernel for env '%s'", env)
+          )
+          next
+        }
+
+        # subset env data and keep only GIDs present in both kernels
+        data_sub <- subset(data, Env == env)
+        if (nrow(data_sub) < 3) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "data_check", Error = "Too few rows in env subset"
+          )
+          next
+        }
+
+        P_env <- VImat[[env]]
+        if (is.null(dim(P_env))) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "precheck", Error = "P_env is not a matrix"
+          )
+          next
+        }
+
+        # align to common GIDs
+        common <- Reduce(intersect, list(unique(as.character(data_sub$GID)),
+                                         rownames(A1), rownames(P_env)))
+        if (length(common) < max(5, folds + 1)) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "id_intersect", Error = "Insufficient common GIDs across data, G, and P"
+          )
+          next
+        }
+
+        data_sub <- data_sub[data_sub$GID %in% common, , drop = FALSE]
+        data_sub$GID  <- factor(as.character(data_sub$GID), levels = common)
+        data_sub$GIDp <- data_sub$GID  # duplicate factor for P kernel
+
+        G_sub <- A1[common, common, drop = FALSE]
+        P_sub <- P_env[common, common, drop = FALSE]
+
+        # optional scaling for stable VC estimation
+        if (scale_kernels) {
+          G_sub <- scale_to_unit_trace(G_sub)
+          P_sub <- scale_to_unit_trace(P_sub)
+        }
+
+        # precompute inverses (same for all folds in CV1 with post-flight P available)
+        Ginv.sparse <- tryCatch(bend_and_inverse(G_sub, eig.tol, ridge), error = identity)
+        if (inherits(Ginv.sparse, "error")) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "G_inverse", Error = Ginv.sparse$message
+          )
+          next
+        }
+        Pinv.sparse <- tryCatch(bend_and_inverse(P_sub, eig.tol, ridge), error = identity)
+        if (inherits(Pinv.sparse, "error")) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "P_inverse", Error = Pinv.sparse$message
+          )
+          next
+        }
+
+        # folds over genotypes (balanced-ish)
+        n_g <- nrow(data_sub)
+        fold_ids <- sample(rep(seq_len(folds), length.out = n_g))
+
+        # build fixed formula
+        formula_fixed <- as.formula(paste(tvar, "~ 1"))
+
+        # per-fold CV
+        for (f in seq_len(folds)) {
+          train_data <- data_sub
+          test_gids  <- as.character(train_data$GID[fold_ids == f])
+          # mask phenotypes for test genotypes
+          train_data[fold_ids == f, tvar] <- NA
+          mod_cv <- tryCatch({
+            asreml(
+              fixed     = formula_fixed,
+              random    = ~ vm(GID,  Ginv.sparse) + vm(GIDp, Pinv.sparse),
+              residual  = ~ idv(units),
+              data      = train_data,
+              na.action = list(x = "include", y = "include"),
+              ai.sing   = TRUE
+            )
+          }, error = identity)
+          
+          
+          if (inherits(mod_cv, "error")) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_model", Error = mod_cv$message
+            )
+            next
+          }
+
+          # EBVs for all GIDs
+          p_gid <- tryCatch(predict(mod_cv, classify = "GID")$pvals, error = identity)
+          if (inherits(p_gid, "error") || is.null(p_gid)) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_predict", Error = if (inherits(p_gid, "error")) p_gid$message else "NULL preds"
+            )
+            next
+          }
+          names(p_gid)[names(p_gid) == "predicted.value"] <- "u_hat"
+
+          # join with observed y for TEST genotypes only
+          y_test <- data_sub[fold_ids == f, c("GID", tvar)]
+          colnames(y_test)[2] <- "y_obs"
+          out <- merge(y_test, p_gid[, c("GID", "u_hat")], by = "GID", all.x = TRUE)
+
+          # metrics
+          cor_p  <- safe_cor(out$u_hat, out$y_obs, "pearson")
+          cor_s  <- safe_cor(out$u_hat, out$y_obs, "spearman")
+          rmse   <- if (sum(stats::complete.cases(out$u_hat, out$y_obs)) >= 1) {
+            sqrt(mean((out$y_obs - out$u_hat)^2, na.rm = TRUE))
+          } else NA_real_
+
+          res_all <- rbind(res_all, data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+            n_test = sum(fold_ids == f),
+            Cor    = cor_p, Cor_s = cor_s, RMSE = rmse,
+            P_available_for_test = TRUE
+          ))
+        } # folds
+      } # env
+    } # trait
+  } # reps
+
+  fail_df <- if (length(fail_log)) do.call(rbind, fail_log) else data.frame()
+  list(results = res_all, failures = fail_df)
+}
+```
+
+
+## **3. Genomic prediction of agronomic traits within, year**
+
+```{r}
+
+traits<- colnames(data_ag)[7:8]
+GP_DK_results_ag_raw_sel <- run_doublekernel_cv1(data = data_ag, A1 = A1,VIPS, traits = traits, reps = 50)
+
+
+save(GP_DK_results_ag_raw_sel, file= "GP_DK_results_ag_raw_sel.Rdata")
+```
+
+
+## **4. Genomic prediction of mq traits within, year**
+
+```{r}
+traits <- colnames(data_mq)[4:15]
+envs<- unique(data_mq$Env)
+GP_DK_results_mq_raw_sel <- run_doublekernel_cv1(data = data_mq, A1 = A1,VIPS, traits = traits,envs=envs, reps = 50)
+
+hist(GP_DK_results_mq_raw_sel$results$Cor)
+save(GP_DK_results_mq_raw_sel, file= "GP_DK_results_mq_raw_sel.Rdata")
+```
+
+
+
+## **4. Genomic prediction of agronomic BLUE within, year**
+
+```{r}
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+preds<- preds %>% pivot_wider(names_from= "VI", values_from= "Predicted")
+traits<- colnames(preds)[c(4,7)]
+envs<- unique(preds$Env)
+
+GP_DK_results_ag_pr <- run_doublekernel_cv1(data = preds, A1 = A1,VIPS, traits = traits,envs=envs, reps = 50)
+save(GP_DK_results_ag_pr, file= "GP_DK_results_ag_pr.Rdata")
+```
+
+
+## **5. Genomic prediction of MQ BLUP traits within, year**
+```{r}
+load(file.path(base_path, "data/mq_BLUP_spatial.RData"))
+traits <- unique(preds$VI)
+preds<- preds[,-5] %>% pivot_wider(names_from = "VI", values_from = "Predicted")
+envs<- unique(preds$Env)
+
+
+GP_DK_results_mq_pr <- run_doublekernel_cv1(data = preds, A1 = A1,VImat, traits = traits,envs=envs, reps = 50)
+save(GP_DK_results_mq_pr, file= "GP_DK_results_mq_pr.Rdata")
+```
+
+

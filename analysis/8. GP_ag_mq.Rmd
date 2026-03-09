@@ -1,0 +1,668 @@
+---
+title: "8. GP_ag_mq"
+author: "sss322"
+date: "2025-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+
+## **0. Importing the dependencies**
+
+```{r}
+library(dplyr)
+library(asreml)
+library(ggplot2)
+library(ASRgenomics)
+library(readxl)
+library(MASS)
+library(tidyr)
+library(dplyr)
+library(caret)
+library(asreml)
+```
+
+
+
+
+
+## **1. Importing the phenotypic data**
+
+Importing the raw agronomic, mq and spectral 
+```{r}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/NY_WMB"
+} else {
+  "~/Documents/GitHub/NY_WMB"
+}
+
+load(file.path(base_path, "data/data_ag.Rdata"))
+load(file.path(base_path, "data/data_mq.Rdata"))
+load(file.path(base_path, "data//WMB_master_geno.Rdata"))
+
+data_ag<- data_ag %>% na.omit()
+data_mq<- data_mq %>% na.omit()
+```
+
+
+
+
+
+## **2. Importing the genotypic data**
+
+```{r}
+ASRgenomics::kinship.diagnostics(A1)
+ASRgenomics::kinship.heatmap(A1)
+ASRgenomics::kinship.pca(A1)
+str(data_ag)
+```
+
+
+
+```{r}
+run_gblup_cv <- function(data, A1, traits, envs = NULL, reps = 50, folds = 5,
+                         eig.tol = 1e-3) {
+  if (is.null(envs)) envs <- if (is.factor(data$Env)) levels(data$Env) else sort(unique(data$Env))
+
+  res_all  <- data.frame()
+  fail_log <- list()
+
+  safe_cor <- function(x, y) {
+    ok <- stats::complete.cases(x, y)
+    if (sum(ok) < 2) return(NA_real_)
+    suppressWarnings(stats::cor(x[ok], y[ok]))
+  }
+
+  for (rep_run in seq_len(reps)) {
+    set.seed(1000 + rep_run)
+    message("\nStarting repetition #", rep_run)
+
+    for (tvar in traits) {
+      for (env in envs) {
+        message("\n   Processing Trait = ", tvar, ", Environment = ", env)
+
+        data_sub <- subset(data, Env == env)
+        if (nrow(data_sub) < folds) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "data_check", Error = "Too few rows for CV"
+          )
+          next
+        }
+
+        # align to G
+        keep_gids <- intersect(unique(as.character(data_sub$GID)), rownames(A1))
+        data_sub  <- data_sub[data_sub$GID %in% keep_gids, , drop = FALSE]
+        if (length(keep_gids) < folds + 1) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "id_intersect", Error = "Insufficient common GIDs with A1"
+          )
+          next
+        }
+        A1_sub <- A1[keep_gids, keep_gids, drop = FALSE]
+
+        # bend + inverse
+        Ghat.bend   <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = eig.tol)$Gb
+        Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+
+        # factors
+        data_sub$GID <- factor(as.character(data_sub$GID), levels = keep_gids)
+
+        # detect spatial columns
+        has_spatial <- all(c("Row", "Column") %in% colnames(data_sub))
+
+        # CV split at the genotype level
+        gids <- unique(as.character(data_sub$GID))
+        fold_gids <- sample(rep(seq_len(folds), length.out = length(gids)))
+        names(fold_gids) <- gids
+
+        # fixed model
+        formula_fixed <- as.formula(paste(tvar, "~ 1"))
+
+        for (f in seq_len(folds)) {
+          test_gids <- names(fold_gids)[fold_gids == f]
+          train_data <- data_sub
+
+          # mask ALL records of the test GIDs
+          train_data[[tvar]][train_data$GID %in% test_gids] <- NA
+
+          # model: AR1xAR1 in RANDOM part if present; otherwise just vm()
+          rand_formula <- if (has_spatial) {
+            ~ vm(GID, Ginv.sparse) + ar1(Row):ar1(Column)
+          } else {
+            ~ vm(GID, Ginv.sparse)
+          }
+
+          mod_cv <- tryCatch({
+            asreml(
+              fixed     = formula_fixed,
+              random    = rand_formula,
+              residual  = ~ idv(units),
+              data      = train_data,
+              na.action = list(x = "include", y = "include"),
+              ai.sing   = TRUE
+            )
+          }, error = function(e) e)
+
+          if (inherits(mod_cv, "error")) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_model", Error = mod_cv$message
+            )
+            next
+          }
+
+          # EBVs for all GIDs
+          p_gid <- tryCatch(predict(mod_cv, classify = "GID")$pvals, error = function(e) e)
+          if (inherits(p_gid, "error") || is.null(p_gid)) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_predict", Error = if (inherits(p_gid, "error")) p_gid$message else "NULL preds"
+            )
+            next
+          }
+          names(p_gid)[names(p_gid) == "predicted.value"] <- "u_hat"
+
+          # observed phenotypes for TEST GIDs only (from the original, unmasked data_sub)
+          y_test <- data_sub[data_sub$GID %in% test_gids, c("GID", tvar)]
+          colnames(y_test)[2] <- "y_obs"
+
+          out <- merge(y_test, p_gid[, c("GID", "u_hat")], by = "GID", all.x = TRUE)
+
+          res_all <- rbind(res_all, data.frame(
+            RepRun = rep_run,
+            Trait  = tvar,
+            Env    = env,
+            Fold   = f,
+            n_test = length(test_gids),
+            Cor    = safe_cor(out$u_hat, out$y_obs)   # <-- ONLY cor(u_hat, y_obs)
+          ))
+        }
+      }
+    }
+  }
+
+  fail_df <- if (length(fail_log)) do.call(rbind, fail_log) else data.frame()
+  list(results = res_all, failures = fail_df)
+}
+```
+
+
+
+
+
+## **3. Genomic prediction of agronomic traits within, year**
+
+```{r}
+traits<- colnames(data_ag)[7:8]
+GP_MM_results_ag_raw <- run_gblup_cv(data = data_ag, A1 = A1, traits = traits, reps = 50)
+save(GP_MM_results_ag_raw, file= "GP_MM_results_ag_raw.Rdata")
+```
+
+
+
+## **4. Genomic prediction of agronomic BLUE within, year**
+
+```{r}
+#load("C:/Users/Siim Sepp/NY_WMB/data/ag_BLUE_spatial.RData")
+preds<- preds %>% pivot_wider(names_from= "VI", values_from= "Predicted")
+
+traits<- colnames(preds)[4:5]
+envs<- unique(preds$Env)
+
+
+GP_MM_results_ag_pred <- run_gblup_cv(data = preds, A1 = A1, traits = traits, envs = envs , reps = 50)
+save(GP_MM_results_ag_pred, file= "GP_MM_results_ag_pred.Rdata")
+```
+
+
+## **5. Genomic prediction of MQ BLUP traits within, year**
+#```{r}
+load("C:/Users/Siim Sepp/NY_WMB/data/mq_BLUP_spatial.RData")
+
+mqtraits <- unique(preds$VI)
+preds<- preds[,-5] %>% pivot_wider(names_from = "VI", values_from = "Predicted")
+envs<- unique(preds$Env)
+
+GP_MM_results_mq_preds <- run_gblup_cv(data = preds, A1 = A1,envs = envs, traits = mqtraits, reps = 50)
+save(GP_MM_results_mq_preds, file= "GP_MM_results_mq_preds.Rdata")
+#```
+
+
+## **6. Genomic prediction of MQ raw traits within, year**
+
+```{r}
+mqtraits <- colnames(data_mq)[4:15]
+envs<- unique(data_mq$Env)
+
+GP_MM_results_mq_raw <- run_gblup_cv(data = data_mq, A1 = A1,envs = envs, traits = mqtraits, reps = 50)
+save(GP_MM_results_mq_raw, file= "GP_MM_results_mq_raw.Rdata")
+table(GP_MM_results_mq_raw$results$Env)
+```
+
+
+
+
+
+## **7. Genomic prediction of MQ and agronomic traitswith CV2**
+
+
+
+
+```{r}
+run_gblup_cv_cv2 <- function(data, A1, traits, envs = NULL,
+                             reps = 50, folds = 5,
+                             eig.tol = 1e-3,
+                             mask_frac = NULL) {
+  if (is.null(envs)) envs <- if (is.factor(data$Env)) levels(data$Env) else sort(unique(data$Env))
+
+  res_all  <- data.frame()
+  fail_log <- list()
+
+  safe_cor <- function(x, y) {
+    ok <- stats::complete.cases(x, y)
+    if (sum(ok) < 2) return(NA_real_)
+    suppressWarnings(stats::cor(x[ok], y[ok]))
+  }
+
+  for (rep_run in seq_len(reps)) {
+    set.seed(2000 + rep_run)
+    message("\nStarting repetition #", rep_run)
+
+    for (tvar in traits) {
+      message("\n Trait = ", tvar)
+
+      # creating a copy
+      df_all <- data
+
+      # align to G (globally)
+      keep_gids <- intersect(unique(as.character(df_all$GID)), rownames(A1))
+      df_all    <- df_all[df_all$GID %in% keep_gids, , drop = FALSE]
+      if (length(keep_gids) < folds + 2) {
+        fail_log[[length(fail_log) + 1]] <- data.frame(
+          RepRun = rep_run, Trait = tvar, Env = NA, Fold = NA,
+          Stage = "id_intersect", Error = "Insufficient common GIDs with A1"
+        )
+        next
+      }
+
+      A1_sub <- A1[keep_gids, keep_gids, drop = FALSE]
+
+      # bend + inverse
+      Ghat.bend   <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = eig.tol)$Gb
+      Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+
+      # factors
+      df_all$GID <- factor(as.character(df_all$GID), levels = keep_gids)
+
+      # detect spatial columns (must exist in ALL envs you want AR1xAR1 for)
+      has_spatial <- all(c("Row", "Column") %in% colnames(df_all))
+
+      # ---------- CV2 masking scheme ----------
+      # Create folds at the GENOTYPE level, but apply masking WITHIN EACH ENV:
+      gids <- unique(as.character(df_all$GID))
+      fold_gids <- sample(rep(seq_len(folds), length.out = length(gids)))
+      names(fold_gids) <- gids
+
+      # Optional: only mask a fraction of genotypes per env per fold (sparser masking)
+      # If mask_frac is NULL, masks all genotypes assigned to that fold.
+      # If mask_frac is in (0,1],subsamples the fraction of the fold's genotypes in each env.
+      if (!is.null(mask_frac)) {
+        if (!is.numeric(mask_frac) || mask_frac <= 0 || mask_frac > 1) {
+          stop("mask_frac must be NULL or a number in (0,1].")
+        }
+      }
+
+      # fixed model
+      formula_fixed <- as.formula(paste(tvar, "~ 1"))
+
+      for (env in envs) {
+        message("\n   Environment = ", env)
+
+        df_env <- df_all[df_all$Env == env, , drop = FALSE]
+        if (nrow(df_env) < folds) {
+          fail_log[[length(fail_log) + 1]] <- data.frame(
+            RepRun = rep_run, Trait = tvar, Env = env, Fold = NA,
+            Stage = "data_check", Error = "Too few rows in this env for CV"
+          )
+          next
+        }
+
+        for (f in seq_len(folds)) {
+          # genotypes intended for masking in this env/fold
+          fold_gid_set <- names(fold_gids)[fold_gids == f]
+
+          # only keep those that actually occur in this environment
+          env_gids <- unique(as.character(df_env$GID))
+          test_gids <- intersect(fold_gid_set, env_gids)
+
+          if (length(test_gids) < 2) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "fold_split", Error = "Too few test GIDs in this env/fold"
+            )
+            next
+          }
+
+          # optionally thin masking within this env/fold
+          if (!is.null(mask_frac) && mask_frac < 1) {
+            n_take <- max(1, floor(length(test_gids) * mask_frac))
+            test_gids <- sample(test_gids, n_take)
+          }
+
+          train_data <- df_all
+
+          # MASK ONLY THIS ENV'S RECORDS for the test_gids (CV2 sparse testing)
+          idx_mask <- train_data$Env == env & as.character(train_data$GID) %in% test_gids
+          train_data[[tvar]][idx_mask] <- NA
+
+          # random part: keep your spatial structure if available
+          rand_formula <- if (has_spatial) {
+            ~ vm(GID, Ginv.sparse) + ar1(Row):ar1(Column)
+          } else {
+            ~ vm(GID, Ginv.sparse)
+          }
+
+          mod_cv <- tryCatch({
+            asreml(
+              fixed     = formula_fixed,
+              random    = rand_formula,
+              residual  = ~ idv(units),
+              data      = train_data,
+              na.action = list(x = "include", y = "include"),
+              ai.sing   = TRUE
+            )
+          }, error = function(e) e)
+
+          if (inherits(mod_cv, "error")) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_model", Error = mod_cv$message
+            )
+            next
+          }
+
+          # EBVs for all GIDs
+          p_gid <- tryCatch(predict(mod_cv, classify = "GID")$pvals, error = function(e) e)
+          if (inherits(p_gid, "error") || is.null(p_gid)) {
+            fail_log[[length(fail_log) + 1]] <- data.frame(
+              RepRun = rep_run, Trait = tvar, Env = env, Fold = f,
+              Stage = "cv_predict", Error = if (inherits(p_gid, "error")) p_gid$message else "NULL preds"
+            )
+            next
+          }
+          names(p_gid)[names(p_gid) == "predicted.value"] <- "u_hat"
+
+          # observed phenotypes ONLY for the masked cells (env + test_gids) from the original (unmasked) df_all
+          y_test <- df_all[df_all$Env == env & as.character(df_all$GID) %in% test_gids, c("GID", tvar)]
+          colnames(y_test)[2] <- "y_obs"
+
+          out <- merge(y_test, p_gid[, c("GID", "u_hat")], by = "GID", all.x = TRUE)
+
+          res_all <- rbind(res_all, data.frame(
+            RepRun = rep_run,
+            Trait  = tvar,
+            Env    = env,
+            Fold   = f,
+            n_test = length(unique(as.character(y_test$GID))),
+            Cor    = safe_cor(out$u_hat, out$y_obs)  # cor(u_hat, y_obs) for masked cells
+          ))
+        }
+      }
+    }
+  }
+
+  fail_df <- if (length(fail_log)) do.call(rbind, fail_log) else data.frame()
+  list(results = res_all, failures = fail_df)
+}
+
+
+```
+
+
+
+```{r}
+cv2_out_f1 <- run_gblup_cv_cv2(
+  data  = data_ag,
+  A1    = A1,
+  traits = c("yield_kgha"),
+  reps  = 50,
+  folds = 5
+)
+
+head(cv2_out$results)
+boxplot(cv2_out$results$Cor)
+save(cv2_out_f1, file= "GP_ag_cv2_res_f1.Rdata")
+```
+
+
+```{r}
+cv2_ag_out_f05 <- run_gblup_cv_cv2(
+  data  = data_ag,
+  A1    = A1,
+  traits = c("yield_kgha"),
+  reps  = 50,
+  folds = 5,
+   mask_frac = 0.5
+)
+
+save(cv2_ag_out_f05, file= "GP_ag_cv2_res_f05.Rdata")
+```
+
+
+
+
+
+## **8. Genomic prediction of MQ and agronomic traits within year, based on the UAV based predictons of these traits**
+
+- Predict original BV
+- Predict phenotype and then predict the BV and compare 
+
+```{r}
+
+run_uav_genomic_cv <- function(
+    data, VImats, A1, traits, env_levels, VIs = NULL,
+    n_reps = 50, k_folds = 5
+) {
+  
+  data$Env <- as.factor(data$Env)
+  if (is.null(VIs)) VIs <- names(VImats[[env_levels[1]]])
+  
+  res_final <- data.frame()
+
+  for (rep_run in seq_len(n_reps)) {
+    message("\n==== Starting repetition #", rep_run, " ====\n")
+
+    ## A) UAV-BASED PHENOMIC PREDICTION
+    uav_pred_list <- list()
+
+    for (env in env_levels) {
+      data_sub <- data %>% filter(Env == env)
+
+      for (tvar in traits) {
+        for (i in VIs) {
+          predictor_data <- VImats[[env]][[i]]
+          merged_df <- merge(data_sub, predictor_data, by = "plot_id") %>% na.omit()
+
+          set.seed(rep_run)
+          inTrain <- createDataPartition(merged_df[[tvar]], p = 0.8, list = FALSE)
+          trainDF <- merged_df[inTrain, ]
+          trainDF <- trainDF[, c(tvar, colnames(predictor_data))]
+
+          ctrl <- trainControl(method = "cv", number = 5)
+          trainDF$plot_id <- as.character(trainDF$plot_id)
+          merged_df$plot_id <- as.character(merged_df$plot_id)
+          
+
+          # Prepare predictor set 
+          train_features <- trainDF[,-2] 
+          test_features  <- merged_df[,-2]
+          # Train the model
+          rf_model <- train(
+              formula(paste(tvar, "~ .")),
+                data = train_features,
+                method = "rf",
+                trControl = ctrl
+              )
+        
+          # Predict
+          UAV_pred <- predict(rf_model, newdata = test_features)
+
+
+          tmp_out <- data.frame(
+            Env = env, Trait = tvar, VI = i,
+            GID = merged_df$GID,
+            plot_id = merged_df$plot_id,
+            UAV_pred = UAV_pred
+            )
+          uav_pred_list[[length(uav_pred_list) + 1]] <- tmp_out
+        }
+      }
+    }
+    uav_pred_df <- do.call(rbind, uav_pred_list)
+
+    ## A0) TRUE BV ESTIMATION
+    true_bv_list <- list()
+
+    for (env in env_levels) {
+      real_sub <- data %>% filter(Env == env)
+
+      for (tvar in traits) {
+        real_trait_sub <- real_sub[, c("GID", tvar)] %>% na.omit()
+        real_trait_sub <- real_trait_sub[real_trait_sub$GID %in% rownames(A1), ]
+        A1_sub <- A1[rownames(A1) %in% real_trait_sub$GID, rownames(A1) %in% real_trait_sub$GID]
+
+        Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+        Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+
+        real_trait_sub$GID <- as.factor(real_trait_sub$GID)
+        form_real <- as.formula(paste(tvar, "~ 1"))
+
+        mod_full_real <- tryCatch({
+          asreml(
+            fixed = form_real,
+            random = ~ vm(GID, Ginv.sparse),
+            residual = ~ units,
+            data = real_trait_sub,
+            ai.sing = TRUE
+          )
+        }, error = function(e) NULL)
+
+        if (!is.null(mod_full_real)) {
+          bv_df <- predict(mod_full_real, classify = "GID")$pvals
+          colnames(bv_df)[colnames(bv_df) == "predicted.value"] <- "BV_true"
+          bv_df$Env <- env; bv_df$Trait <- tvar
+          true_bv_list[[length(true_bv_list) + 1]] <- bv_df[, c("GID", "BV_true", "Env", "Trait")]
+        }
+      }
+    }
+    true_bv_df <- do.call(rbind, true_bv_list)
+
+    ## B) GENOMIC PREDICTION FROM UAV-DERIVED PHENOTYPES
+    for (env in env_levels) {
+      for (tvar in traits) {
+        for (i in VIs) {
+          message("   [Rep=", rep_run, "] UAV-based -> Genomic: Env=", env, " Trait=", tvar, " VI=", i)
+
+          sub_pred <- uav_pred_df %>% filter(Env == env, Trait == tvar, VI == i)
+          sub_true <- true_bv_df %>% filter(Env == env, Trait == tvar)
+
+          merged_pheno <- merge(sub_pred, sub_true, by = "GID")
+          merged_pheno <- merged_pheno[merged_pheno$GID %in% rownames(A1), ]
+          A1_sub <- A1[rownames(A1) %in% merged_pheno$GID, rownames(A1) %in% merged_pheno$GID]
+
+          Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+          Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+
+          merged_pheno$Y <- merged_pheno$UAV_pred
+          merged_pheno$GID <- as.factor(merged_pheno$GID)
+
+          set.seed(rep_run)
+          fold_ids <- sample(rep(1:k_folds, length.out = nrow(merged_pheno)))
+          fold_list <- vector("list", length = k_folds)
+
+          for (f in seq_len(k_folds)) {
+            train_df <- merged_pheno
+            train_df$Y[fold_ids == f] <- NA
+
+            mod_cv <- tryCatch({
+              asreml(
+                fixed = Y ~ 1,
+                random = ~ vm(GID, Ginv.sparse),
+                residual = ~ units,
+                data = train_df,
+                na.action = list(x = "include", y = "include"),
+                ai.sing = TRUE
+              )
+            }, error = function(e) NULL)
+
+            pred_cv <- tryCatch({
+              if (!is.null(mod_cv)) predict(mod_cv, classify = "GID")$pvals else NULL
+            }, error = function(e) NULL)
+
+            if (!is.null(pred_cv)) {
+              colnames(pred_cv)[colnames(pred_cv) == "predicted.value"] <- "BV_cv"
+              merged_test <- merge(pred_cv[, c("GID", "BV_cv")], merged_pheno[, c("GID", "BV_true")], by = "GID")
+              test_gids <- train_df$GID[fold_ids == f]
+              merged_test <- merged_test %>% filter(GID %in% test_gids)
+              cor_val <- cor(merged_test$BV_cv, merged_test$BV_true, use = "complete.obs")
+            } else {
+              cor_val <- NA
+            }
+
+            fold_list[[f]] <- data.frame(
+              Rep = rep_run, Env = env, Trait = tvar, VI = i, Fold = f, CorVal = cor_val
+            )
+          }
+          res_final <- rbind(res_final, do.call(rbind, fold_list))
+        }
+      }
+    }
+  }
+
+  return(res_final)
+}
+
+```
+
+
+test MQ
+
+```{r}
+load("C:/Users/Siim Sepp/NY_WMB/data/VImat.Rdata")
+mqtraits <- colnames(data_mq)[4:15]
+envs<- unique(data_mq$Env)
+VIs<- names(VImats$KET21)
+
+GP_PP_MM_mq <- run_uav_genomic_cv(data = data_mq, VImats = VImats, A1 = A1, traits = mqtraits, env_levels = envs, VIs = NULL,
+    n_reps = 5, k_folds = 5
+)
+
+save(GP_PP_MM_mq, file = "GP_PP_MM_results_mq.Rdata")
+```
+
+
+test ag
+
+```{r}
+agtraits <- colnames(data_ag)[7:10]
+envs<- unique(data_ag$Env)
+VIs<- names(VImats$KET21)
+
+GP_PP_MM_ag <- run_uav_genomic_cv(data = data_ag, VImats = VImats, A1 = A1, traits = agtraits, env_levels = envs, VIs = NULL,
+    n_reps = 50, k_folds = 5
+)
+
+save(GP_PP_MM_ag, file = "GP_PP_MM_results_ag.Rdata")
+
+#boxplot(GP_PP_MM_ag$CorVal ~GP_PP_MM_ag$Trait)
+#boxplot(GP_PP_MM_mq$CorVal ~GP_PP_MM_mq$Trait)
+```
+

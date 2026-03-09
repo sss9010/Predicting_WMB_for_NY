@@ -1,0 +1,976 @@
+---
+title: "12. Prediction Plots"
+author: "sss322"
+date: "2025-10-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r}
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(stringr)
+library(forcats)
+```
+
+
+
+# **1. Import phenomic prediction LM, RF, GLM and MM results **
+
+Load files
+```{r}
+#LM, RF, EN, LASSO, 
+# Define the base path - you can set this depending on your OS
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/NY_WMB/analysis"
+} else {
+  "~/Documents/GitHub/NY_WMB/analysis"
+}
+
+# Load files with constructed paths
+load(file.path(base_path, "PP_LM_results_ag_pred.Rdata"))
+load(file.path(base_path, "PP_LM_results_ag_raw.Rdata"))
+load(file.path(base_path, "PP_LM_results_mq_raw.Rdata"))
+
+# PP MM
+load(file.path(base_path, "PP_MM_results_ag_pred_comb.Rdata"))
+load(file.path(base_path, "PP_MM_results_ag_pred_sel.Rdata"))
+load(file.path(base_path, "PP_MM_results_ag_raw_comb.Rdata"))
+load(file.path(base_path, "PP_MM_results_ag_raw_sel.Rdata"))
+load(file.path(base_path, "PP_MM_results_MQ_pred_comb.Rdata"))
+load(file.path(base_path, "PP_MM_results_MQ_pred_sel.Rdata"))
+load(file.path(base_path, "PP_MM_results_MQ_raw_comb.Rdata"))
+load(file.path(base_path, "PP_MM_results_MQ_raw_sel.Rdata"))
+
+# GBLUP GP
+load(file.path(base_path, "GP_MM_results_ag_pred.Rdata"))
+load(file.path(base_path, "GP_MM_results_ag_raw.Rdata"))
+load(file.path(base_path, "GP_MM_results_mq_preds.Rdata"))
+load(file.path(base_path, "GP_MM_results_mq_raw.Rdata"))
+
+# MT GP
+load(file.path(base_path, "MT_mq_res_raw.Rdata"))
+load(file.path(base_path, "MT_ag_res_raw.Rdata"))
+
+# double kernel GP
+load(file.path(base_path, "GP_DK_results_ag_pr_c.Rdata"))
+load(file.path(base_path, "GP_DK_results_ag_pr_sel.Rdata"))
+load(file.path(base_path, "GP_DK_results_ag_raw_c.Rdata"))
+load(file.path(base_path, "GP_DK_results_ag_raw_sel.Rdata"))
+load(file.path(base_path, "GP_DK_results_mq_raw_c.Rdata"))
+load(file.path(base_path, "GP_DK_results_mq_raw_sel.Rdata"))
+load(file.path(base_path, "GP_DK_results_mq_pr_c.Rdata"))
+load(file.path(base_path, "GP_DK_results_mq_pr_sel.Rdata"))
+
+
+```
+
+
+# **2. Prepare and merge LM, RF, GLM and MM results **
+
+**Merge MM**
+```{r}
+PP_MM_results_ag_pred_sel$met  <- "MM_ag_pred_sel"
+PP_MM_results_ag_pred_comb$met <- "MM_ag_pred_comb"
+PP_MM_results_ag_pred_sel$BLUE <- "Two"
+PP_MM_results_ag_pred_comb$BLUE<- "Two"
+PP_MM_results_ag_pred_sel$mod  <- "MM"
+PP_MM_results_ag_pred_comb$mod <- "MM"
+PP_MM_results_ag_pred_sel$sel  <- "sel"
+PP_MM_results_ag_pred_comb$sel <- "comb"
+
+PP_MM_results_ag_raw_comb$met  <- "MM_ag_raw_comb"
+PP_MM_results_ag_raw_sel$met   <- "MM_ag_raw_sel"
+PP_MM_results_ag_raw_comb$BLUE <- "One"
+PP_MM_results_ag_raw_sel$BLUE  <- "One"
+PP_MM_results_ag_raw_comb$mod  <- "MM"
+PP_MM_results_ag_raw_sel$mod   <- "MM"
+PP_MM_results_ag_raw_comb$sel  <- "comb"
+PP_MM_results_ag_raw_sel$sel   <- "sel"
+
+PP_MM_results_MQ_raw_comb$met  <- "MM_mq_raw_comb"
+PP_MM_results_MQ_raw_sel$met   <- "MM_mq_raw_sel"
+PP_MM_results_MQ_raw_comb$BLUE <- "One"
+PP_MM_results_MQ_raw_sel$BLUE  <- "One"
+PP_MM_results_MQ_raw_comb$mod  <- "MM"
+PP_MM_results_MQ_raw_sel$mod   <- "MM"
+PP_MM_results_MQ_raw_comb$sel  <- "comb"
+PP_MM_results_MQ_raw_sel$sel   <- "sel"
+
+PP_MM_results_MQ_pred_comb$met <- "MM_mq_pred_comb"
+PP_MM_results_MQ_pred_sel$met  <- "MM_mq_pred_sel"
+PP_MM_results_MQ_pred_comb$BLUE<- "Two"
+PP_MM_results_MQ_pred_sel$BLUE <- "Two"
+PP_MM_results_MQ_pred_comb$mod <- "MM"
+PP_MM_results_MQ_pred_sel$mod  <- "MM"
+PP_MM_results_MQ_pred_comb$sel <- "comb"
+PP_MM_results_MQ_pred_sel$sel  <- "sel"
+
+#PP_MM_results_ag_pred_sel<- PP_MM_results_ag_pred_sel[,-3]
+
+
+
+PP_MM_master<- rbind(PP_MM_results_ag_pred_sel, PP_MM_results_ag_pred_comb,  PP_MM_results_ag_raw_comb,PP_MM_results_ag_raw_sel, PP_MM_results_MQ_pred_comb, PP_MM_results_MQ_pred_sel, PP_MM_results_MQ_raw_comb, PP_MM_results_MQ_raw_sel)
+```
+
+
+**Merge LM RF, PCR** 
+```{r}
+names(PP_LM_results_ag_pred)<- names(PP_LM_results_ag_raw)
+PP_LM_results_ag_pred$accuracy$met <- "LM_ag_pred"
+PP_LM_results_ag_raw$accuracy$met  <- "LM_ag_raw"
+PP_LM_results_mq_raw$accuracy$met  <- "LM_mq_raw"
+
+PP_LM_results_ag_pred$accuracy$mod <- "LM"
+PP_LM_results_ag_raw$accuracy$mod  <- "LM"
+PP_LM_results_mq_raw$accuracy$mod  <- "LM"
+
+PP_LM_results_ag_pred$accuracy$BLUE<- "Two"
+PP_LM_results_ag_raw$accuracy$BLUE <- "One"
+PP_LM_results_mq_raw$accuracy$BLUE <- "One"
+
+PP_LM_results_ag_pred$accuracy$sel <- "comb"
+PP_LM_results_ag_raw$accuracy$sel  <- "comb"
+PP_LM_results_mq_raw$accuracy$sel  <- "comb"
+PP_LM_master<- rbind(PP_LM_results_ag_pred$accuracy, PP_LM_results_ag_raw$accuracy, PP_LM_results_mq_raw$accuracy)
+
+colnames(PP_MM_master)[3]<- "Accuracy"
+colnames(PP_MM_master)[4]<- "Cycle"
+PP_MM_master$Predictor_Set<- "NA"
+PP_MM_master$Model <- "PBLUP"
+PP_LM_MM_accuracy<- rbind(PP_LM_master, PP_MM_master)
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>% filter(!Trait == "BarleyColor.Agtron.")
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>% filter(!Trait == "WortClarity")
+```
+
+
+
+
+**Merge LM and MM.** 
+```{r}
+cv_summary <- PP_LM_MM_accuracy %>%
+  group_by(Trait, met, Model, Predictor_Set) %>%
+  summarise(
+    mean_accuracy = round(mean(Accuracy, na.rm = TRUE),2),
+    sd_accuracy   = round(sd(Accuracy, na.rm = TRUE),2),
+    n  = n()
+    )
+
+cv_summary
+
+trait_map <- c(
+  KernelWeight.mg. = "KW",
+  on6.64....       = "on6/64",
+  MaltExtract...   = "ME",
+  BarleyProtein... = "BP",
+  WortProtein...   = "WP",
+  S.T              = "S.T",
+  DP..ASBC.       = "DP",
+  Alpha.amylase.20.DU. = "AA",
+  Beta.glucan.ppm. = "BG",
+  HD_JD = "HD",
+  yield_kgha = "GY",
+  FAN.ppm.         = "FAN",
+  AdjunctQualityScore = "Adj.Sc",
+  All_MaltQualityScore = "All.Sc")
+
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3",
+  MCG25 = "grey")
+
+pal1 <- c(
+  EN  = "cornsilk3",
+  Lin  = "palegreen2",
+  PCR  = "wheat2",
+  RR = "lightblue3",
+  Lasso = "grey", 
+  PBLUP = "pink2", 
+  RF= "purple4")
+
+trait_order<- c( "GY" , "HD",  "KW", "on6/64" , "FAN" , "DP", "AA", "S.T" , "BG" , "ME",  "BP", "WP", "Adj.Sc", "All.Sc" )
+
+PP_LM_MM_accuracy  <- PP_LM_MM_accuracy  %>%  
+  mutate( Environment = trimws(as.character(Environment)),
+          Environment = fct_relevel(Environment, env_order)) %>% 
+  mutate( Trait= trimws(as.character(Trait)),
+          Trait = fct_relevel(Trait, trait_order))
+
+unique(PP_LM_MM_accuracy$Model)
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("lastic", Model), "EN", Model))
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("asso", Model), "Lasso", Model))
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("idge", Model), "RR", Model))
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("Fores", Model), "RF", Model))
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("Comp", Model), "PCR", Model))
+
+PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
+  mutate(Model = ifelse(grepl("Linear", Model), "Lin", Model))
+
+
+table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
+```
+
+
+**Merge GP**
+```{r}
+GP_MM_results_ag_pred$results$BLUE<- "Two"
+GP_MM_results_ag_raw$results$BLUE<- "One"
+GP_MM_results_mq_raw$results$BLUE<- "One"
+GP_MM_results_mq_preds$results$BLUE<- "Two"
+
+GP_MM_results_ag_pred$results$met <- "GP"
+GP_MM_results_ag_raw$results$met <- "GP"
+GP_MM_results_mq_raw$results$met <- "GP"
+GP_MM_results_mq_preds$results$met <- "GP"
+
+
+colnames(GP_MM_results_ag_pred$results)
+colnames(GP_MM_results_mq_preds$results)
+colnames(GP_MM_results_ag_raw$results)
+colnames(GP_MM_results_mq_raw$results)
+colnames(GP_MM_results_ag_pred$results)[5]<- "Cor"
+colnames(GP_MM_results_mq_preds$results)[5]<- "Cor"
+
+GP_MM_master <- rbind(GP_MM_results_ag_pred$results$, GP_MM_results_ag_raw$results[,-5], GP_MM_results_mq_raw$results[,-5], GP_MM_results_mq_preds$results$)
+
+
+unique(GP_MM_master$Trait)
+
+GP_MM_master <- GP_MM_master%>% filter(!Trait == "BarleyColor.Agtron.")
+GP_MM_master <- GP_MM_master %>% filter(!Trait == "WortClarity")
+GP_MM_master <- GP_MM_master %>% filter(!Trait == "winter_survival")
+GP_MM_master <- GP_MM_master %>% filter(!Trait == "Ht")
+str(GP_MM_master)
+GP_MM_master<- GP_MM_master[,-1]
+GP_MM_master<- GP_MM_master[-3]
+GP_MM_master$Cor_Trait<- NA
+GP_MM_master$type<- NA
+```
+
+
+**Merge MT GP**
+```{r}
+MT_res_raw<- rbind(MT_ag_res_raw$results, MT_mq_res_raw$results)
+MT_res_raw<- MT_res_raw[-4:-5]
+MT_res_raw$BLUE<- "One"
+MT_res_raw$type<- NA
+MT_res_raw$met<- "MT"
+```
+
+
+**merge DK GP**
+```{r}
+GP_DK_results_ag_pr_c$results$type<- "comb"
+GP_DK_results_ag_pr_sel$results$type<- "sel"
+GP_DK_results_ag_raw_c$results$type<- "comb"
+GP_DK_results_ag_raw_sel$results$type<- "sel"
+
+GP_DK_results_mq_pr_c$results$type<- "comb"
+GP_DK_results_mq_pr_sel$results$type<- "sel"
+GP_DK_results_mq_raw_c$results$type<- "comb"
+GP_DK_results_mq_raw_sel$results$type<- "sel"
+
+#failers
+GP_DK_results_ag_pr_c$failures$type<- "comb"
+GP_DK_results_ag_pr_sel$failures$type<- "sel"
+GP_DK_results_ag_raw_c$failures$type<- "comb"
+GP_DK_results_ag_raw_sel$failures$type<- "sel"
+
+GP_DK_results_mq_pr_c$failures$type<- "comb"
+GP_DK_results_mq_pr_sel$failures$type<- "sel"
+
+
+GP_DK_res<- rbind(GP_DK_results_ag_pr_c$results, GP_DK_results_ag_pr_sel$results, GP_DK_results_ag_raw_c$results, GP_DK_results_ag_raw_sel$results, GP_DK_results_mq_pr_c$results, GP_DK_results_mq_pr_sel$results, GP_DK_results_mq_raw_c$results, GP_DK_results_mq_raw_sel$results)
+
+GP_DK_fail<- rbind(GP_DK_results_ag_pr_c$failures, GP_DK_results_ag_pr_sel$failures, GP_DK_results_ag_raw_c$failures, GP_DK_results_ag_raw_sel$failures, GP_DK_results_mq_pr_c$failures, GP_DK_results_mq_pr_sel$failures)
+
+GP_DK_res<- GP_DK_res %>% filter(!Trait == "BarleyColor.Agtron.") %>% filter(!Trait == "WortClarity")
+
+GP_DK_res <- GP_DK_res[c(2,3,6,10)]
+GP_DK_res$met<- "DK"
+GP_DK_res$BLUE<- "One"
+GP_DK_res$Cor_Trait<- NA
+```
+
+
+
+#Merge GP, MT, DK. 
+```{r}
+GP_DK_res<- GP_DK_res %>% filter(type== "comb")
+GP_res<- rbind(GP_DK_res, GP_MM_master, MT_res_raw)
+
+GP_res <- GP_res %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+GP_res <- GP_res  %>%  
+  mutate( Environment = trimws(as.character(Env)),
+          Environment = fct_relevel(Env, env_order)) %>%
+  mutate( Trait= trimws(as.character(Trait)),
+          Trait = fct_relevel(Trait, trait_order))
+
+
+cv_summary <- GP_res %>%
+  group_by(Trait, met) %>%
+  summarise(
+    mean_accuracy = round(mean(Cor, na.rm = TRUE),2),
+    sd_accuracy   = round(sd(Cor, na.rm = TRUE),2),
+    n  = n()
+    )
+
+cv_summary
+
+```
+
+
+
+
+
+
+# **3. Plot LM, RF, GLM and MM results **
+```{r}
+table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>% filter(BLUE == "One")
+
+##############Trait##########################################################################
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = Trait, y = Accuracy, fill = Trait)) +
+  geom_boxplot() +
+   #facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Trait"
+  ) +
+ scale_fill_manual(values = pal1, drop = FALSE) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+##############Environment##########################################################################
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Environment)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Environment"
+  ) +
+ scale_fill_manual(values = pal, drop = FALSE) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+##############Model##########################################################################
+table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>% filter(BLUE == "One")
+
+p<- ggplot(PP_LM_MM_accuracy1, aes(x =Model, y = Accuracy, fill = Model)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+ scale_fill_manual(values = pal1, drop = FALSE) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+
+
+
+##############Model##########################################################################
+#One stage or two stage
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>%
+  filter(mod == "MM")
+
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = BLUE, y = Accuracy, fill = BLUE)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+# Combined v Selected MM.
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
+  filter(BLUE == "One", mod == "MM")
+
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = sel, y = Accuracy, fill = sel)) +
+  geom_boxplot() +
+  facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+# Accuracy by Model
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
+  filter(BLUE == "One")
+
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_boxplot() +
+  facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+
+print(p)
+
+
+# Accuracy by Environment 
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
+  filter(BLUE == "One") %>% filter(Predictor_Set == "NDVI") %>% filter(Model == "Lin")
+str(PP_LM_MM_accuracy)
+
+
+ggplot(PP_LM_MM_accuracy1, aes(x = Trait, y = Accuracy, fill = Trait)) +
+  geom_boxplot() +
+  labs(
+    title = "",
+    y = "CV Prediction Accuracy",
+    x = ""
+  ) +
+  facet_wrap(~Environment, scales = "free_x") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  ) +
+  coord_cartesian(ylim = c(0, 1))
+
+print(p)
+
+# Accuracy by VI
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
+  filter(BLUE == "One", mod == "LM")
+
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Predictor_Set)) +
+  geom_boxplot() +
+  facet_wrap(~Trait) +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
+  filter(BLUE == "One") #%>%
+  #filter(sel== "sel")
+######################################################ENV
+cv_summary <- PP_LM_MM_accuracy1 %>%
+  group_by(Trait, Environment) %>%
+  summarise(
+    mean_accuracy = mean(Accuracy, na.rm = TRUE),
+    sd_accuracy   = sd(Accuracy, na.rm = TRUE),
+    se_accuracy   = sd_accuracy / sqrt(n()),
+    cv_accuracy   = sd_accuracy / mean_accuracy,
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(Trait, Environment)
+
+cv_summary
+#################################3
+cv_env_effect <- cv_summary %>%
+  group_by(Trait) %>%
+  summarise(
+    env_mean_range = max(mean_accuracy) - min(mean_accuracy),
+    env_sd_of_means = sd(mean_accuracy),
+    env_sd_men_rat = env_sd_of_means/env_mean_range, 
+    .groups = "drop"
+  )  %>%  arrange( env_sd_of_means)
+
+cv_env_effect 
+############################## MODEL'
+
+cv_summary <- PP_LM_MM_accuracy1 %>%
+  group_by(Model) %>%
+  summarise(
+    mean_accuracy = mean(Accuracy, na.rm = TRUE),
+    sd_accuracy   = sd(Accuracy, na.rm = TRUE),
+    se_accuracy   = sd_accuracy / sqrt(n()),
+    cv_accuracy   = sd_accuracy / mean_accuracy,
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(Trait, Model)
+
+cv_summary
+################################# 
+
+cv_env_effect <- cv_summary %>%
+  group_by(Model) %>%
+  summarise(
+    env_mean_range = max(mean_accuracy) - min(mean_accuracy),
+    env_sd_of_means = sd(mean_accuracy),
+    env_sd_men_rat = env_sd_of_means/env_mean_range, 
+    .groups = "drop"
+  )  %>%  arrange( env_mean_range)
+
+cv_env_effect 
+##############################
+```
+
+
+
+
+
+# **4. Plot MM phenomic results **
+```{r}
+#One stage or two stage
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>%   filter(mod == "MM")
+
+#ENV
+p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Environment)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+print(p)
+
+```
+
+
+
+
+# **5. Plot GP results **
+```{r}
+agtrait<- c("GY", "HD")
+
+#Accuracy by environment
+GP_MM_master1<- GP_res %>% filter(BLUE == "One") %>% filter(met == "GP") %>% filter(Trait %in% agtrait)
+
+ggplot(GP_MM_master1, aes(x =Environment, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+  facet_wrap(~  Trait, scales = "free_x") +
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "Model Method") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+
+GP_MM_master1<- GP_res %>% filter(BLUE == "One") %>% filter(met == "GP") %>% filter(!Trait %in% agtrait)
+
+ggplot(GP_MM_master1, aes(x =Trait, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+  #facet_wrap(~  Trait, scales = "free_x") +
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "Model Method") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+
+#Accuracy by one or two stage
+GP_MM_master1<- GP_res %>% filter(met == "GP") #%>% filter(Trait %in% agtrait)
+ggplot(GP_MM_master1, aes(x = BLUE, y = Cor, fill = BLUE)) +
+  geom_boxplot() +
+  facet_grid(~  Trait, scales = "free") +
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "Model Method") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),  legend.position = "bottom"
+    )
+
+
+#Accuracy by environment
+GP_MM_master1<- GP_res %>% filter(BLUE == "One") %>% filter(met == "GP") #%>% filter(Trait %in% agtrait)
+
+ggplot(GP_MM_master1, aes(x =Environment, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+ facet_wrap(~Trait, scales = "free_x", nrow = 2, ncol = 7)+
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+```
+
+
+
+
+# **6. Plot MT GP results **
+
+```{r}
+
+#Accuracy by environment
+MT_res_raw<- GP_res %>% filter(met =="MT") %>% filter(Cor_Trait =="FPC1")
+
+
+
+ggplot(MT_res_raw, aes(x =Environment, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+ facet_wrap(~Trait, scales = "free_x", nrow = 2, ncol = 7)+
+  labs(title = " ",
+       y = " CV Prediction Accuracy", x = "") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+
+#Accuracy by cor trait
+ggplot(MT_res_raw, aes(x =Trait, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+  #facet_wrap(~  Trait, scales = "free_x") +
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "Model Method") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+
+
+ggplot(MT_res_raw, aes(x =Trait, y = Cor, fill = Trait)) +
+  geom_boxplot() +
+  #facet_wrap(~  Trait, scales = "free_x") +
+  labs(title = " ",
+       y = "Prediction Accuracy", x = "Model Method") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+```
+
+
+
+# **7. Plot DK GP results **
+
+```{r}
+#Accuracy by environment
+GP_DK_res <- GP_res %>% filter(met =="DK") %>% filter(Trait %in% agtrait)
+
+ggplot(GP_DK_res, aes(x = Trait, y = Cor, fill = Trait)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+GP_DK_res <- GP_res %>% filter(met =="DK") %>% filter(!Trait %in% agtrait)
+
+ggplot(GP_DK_res, aes(x = Trait, y = Cor, fill = Trait)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+#############################################
+GP_DK_res <- GP_res %>% filter(met =="DK") 
+
+ggplot(GP_DK_res, aes(x =Environment, y = Cor, fill = Environment)) +
+  geom_boxplot() +
+ facet_wrap(~Trait, scales = "free_x", nrow = 2, ncol = 7)+
+  labs(title = " ",
+       y = " CV Prediction Accuracy", x = "") +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
+
+```
+
+
+
+
+# **8. Plot all GP together **
+
+```{r}
+str(GP_res)
+cort<- c("NDVI" ,"PC1", "PC2",  "FPC2", "PC3",  "FPC3")
+
+table(GP_res$Trait, GP_res$type, GP_res$met)
+table(GP_res$met, GP_res$type)
+# %>% filter(type == "comb") %>% filter()
+#ag traits
+
+GP_res1<- GP_res %>% filter(BLUE == "One") %>% filter(Trait %in% agtrait) %>% filter(!Cor_Trait %in% cort) %>% filter(!type == "sel")
+
+unique(GP_res$Cor_Trait)
+ggplot(GP_res1, aes(x = Trait, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+table(GP_res$met, GP_res$Trait)
+
+ggplot(GP_res1, aes(x = met, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+#mq traits
+
+GP_res1<- GP_res %>% filter(BLUE == "One") %>% filter(!Trait %in% agtrait) %>% filter(!Cor_Trait %in% cort)
+
+
+ggplot(GP_res1, aes(x = Trait, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+
+ggplot(GP_res1, aes(x = met, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+```
+
+
+
+
+# **9. Plot PP with H <-GP **
+```{r, eval=FALSE}
+load("~/Documents/GitHub/NY_WMB/heritabilites.Rdata")
+#load("analysis/heritabilites.Rdata")
+str(H2ag)
+colnames(H2ag)[4]<- "h2"
+H2s<- rbind(H2ag, H2mq)
+
+H2s<-H2s %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+H2s <- H2s  %>%  
+  mutate( Environment = trimws(as.character(Environment)),
+          Environment = fct_relevel(Environment, env_order)) %>% 
+  mutate( Trait= trimws(as.character(Trait)),
+          Trait = fct_relevel(Trait, trait_order))
+
+
+
+str(H2s)
+str(PP_LM_MM_accuracy)
+
+PP_LM_MM<- left_join(PP_LM_MM_accuracy, H2s, by= c("Trait", "Environment"))
+
+PP_LM_MM$Cor<- PP_LM_MM$Accuracy * (PP_LM_MM$H2)
+
+
+
+########################
+PP_LM_MM1<- PP_LM_MM  %>% filter(Trait %in% agtrait) %>% filter(BLUE == "One")
+
+ggplot(PP_LM_MM1, aes(x = Trait, y = Cor, fill = Trait)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+PP_LM_MM1<- PP_LM_MM  %>% filter(Trait %in% agtrait) 
+ggplot(PP_LM_MM1, aes(x = met, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+
+
+#############################################################################
+PP_LM_MM1<- PP_LM_MM %>% filter(!Trait %in% agtrait) %>% filter(BLUE == "One") 
+
+ggplot(PP_LM_MM1, aes(x = Trait, y = Cor, fill = Trait)) +
+  geom_boxplot() +
+   facet_grid(~Environment, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+PP_LM_MM1<- PP_LM_MM  %>% filter(!Trait %in% agtrait) 
+ggplot(PP_LM_MM1, aes(x = met, y = Cor, fill = met)) +
+  geom_boxplot() +
+   facet_grid(~Trait, scales = "free") +
+  labs(
+    title = " ",
+    y = "CV Prediction Accuracy",
+    x = "Model Method"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),
+    legend.position = "bottom"
+  )
+
+```
+
+
+

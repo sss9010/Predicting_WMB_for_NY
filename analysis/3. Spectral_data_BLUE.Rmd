@@ -1,0 +1,398 @@
+---
+title: "3. Spectral data Spatial BLUE"
+output: html_document
+author: "sss322"
+date: "2024-12_06"
+---
+
+
+```{r setup, include=FALSE, warning=FALSE, eval=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Introduction
+This document provides an overview of the spatial BLUE wth the multi-spectral drone imagery data, agronomic and malting quality data. The goal is to conduct the first BLUE stage with the vegetation indices and explore data distribution.
+
+
+
+## **1. Importing Dependencies **
+
+Loading dependencies
+```{r, message=FALSE}
+library(readr)
+library(readxl)
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(tidyr)
+library(ASRgenomics)
+library(factoextra)
+library(fda)
+library(ASRtriala)
+library(writexl)
+library(openxlsx)
+library(jsonlite)
+library(data.table)
+library(asreml)
+library(dplyr)
+library(purrr)
+Sys.setlocale("LC_TIME", "C")
+```
+
+
+
+## **2. Setting the working directory and importing the data**
+
+```{r, message=FALSE}
+#load("C:/Users/Siim Sepp/NY_WMB/data/WMB_pheno_all.Rdata")
+load("C:/Users/Siim Sepp/NY_WMB/data/data_sp.Rdata")
+load("C:/Users/Siim Sepp/NY_WMB/data/data_mq.Rdata")
+load("C:/Users/Siim Sepp/NY_WMB/data/data_ag.Rdata")
+
+#load("~/Documents/GitHub/NY_WMB/data/WMB_pheno_all.Rdata")
+table(data_sp$Env, data_sp$Timepoint)
+table(data_mq$Env)
+data_mq1<- data_mq %>% drop_na()
+```
+
+```{r, message=FALSE}
+data <- data_sp %>% arrange(Timepoint) #%>%
+  #filter(
+   # !(Env == "SNY22" & Timepoint == "7"),
+  #  !(Env == "MCG23" & Timepoint == "1"))
+data$GID<- as.factor(data$GID)
+colnames(data_sp)
+```
+
+
+
+## **3. Fit simple BLUE model for spec**
+
+```{r}
+envs    <-  unique(data_sp$Env)
+traits <- colnames(data_sp)[c(5,13)]
+raw_dat <- data_sp %>% left_join(data_ag[,c(1,5,6)], by= "plot_id")
+raw_dat<- raw_dat[,c(2,3, 4, 5, 13, 15, 16)]
+## -------------------------------------------------------------
+##  containers
+## -------------------------------------------------------------
+fit_list  <- list()   
+pred_list <- list()   
+data$GID<- as.character(data$GID)
+timepoints <- unique(raw_dat$Timepoint)
+## -----------------------------------------------------------------
+##  loops
+## -----------------------------------------------------------------
+for (tr in traits) {
+
+  fits_vi <- list()
+
+  for (e in envs) {
+    
+    dat_sub <- raw_dat %>%
+      filter(Env == e, !is.na(.data[[tr]])) %>%
+      mutate(
+        GID = factor(GID),
+        Row = factor(Row),
+        Col = factor(Column)
+      )
+    
+    timepoints <- unique(dat_sub$Timepoint)
+
+    for (tp in timepoints) {
+      dat_sub1 <- dat_sub %>% filter(Timepoint == tp) %>% na.omit()
+
+      ## model -----------------------------------------------------------------
+      mod <- tryCatch(
+        asreml(
+          fixed    = reformulate("GID", response = tr),
+          random   = ~ar1(Row):ar1(Column),
+          residual = ~ units,
+          data     = dat_sub1
+        ),
+        error = function(err) {
+          message("asreml failed for ", tr, " | ", e, " | tp ", tp,
+                  " : ", err$message)
+          NULL
+        }
+      )
+
+      ## store fit -------------------------------------------------------------
+      fits_vi[[paste(e, tp, sep = "_")]] <- mod
+
+      ## predictions -----------------------------------------------------------
+      if (!is.null(mod)) {
+        pred_result <- tryCatch({
+          pred <- predict(mod, classify = "GID")$pvals %>%
+            as_tibble() %>%
+            transmute(
+              VI        = tr,
+              Env       = e,
+              Timepoint = tp,
+              GID,
+              Predicted = predicted.value,
+              SE        = std.error
+            )
+
+          pred_list[[length(pred_list) + 1]] <- pred
+        }, error = function(err) {
+          message("Prediction failed for ", tr, " | ", e, " | tp ", tp,
+                  " : ", err$message)
+          NULL
+        })
+      }
+    } # time‑point loop
+  }   # environment loop
+
+  fit_list[[tr]] <- fits_vi
+}     # trait loop
+
+## -----------------------------------------------------------------
+##  tidy table of all predictions
+## -----------------------------------------------------------------
+preds <- bind_rows(pred_list)
+preds_m<- preds
+table(preds$Env, preds$VI)
+##  optional saves
+save(fit_list, file = "spec_BLUE_spatial_fits.RData")
+save(preds,  file = "spec_BLUE_spatial.RData")
+```
+
+
+
+## **4. Adding flight time data to the predicitons and filter for QC**
+
+```{r}
+load("C:/Users/Siim Sepp/NY_WMB/data/wmb_multi_alldata.Rdata")
+colnames(multi)
+# Create a mapping of timepoint to JD
+timepoint_JD <- multi[,c(1,3, 10,31)] %>%
+  distinct()  
+colnames(timepoint_JD)[2] <- "Timepoint"
+timepoint_JD
+```
+
+
+
+## **5. Fit simple BLUE model for ag**
+
+```{r, eval=TRUE}
+envs    <- unique(data_ag$Env)
+traits <- colnames(data_ag)[c(7:9)]
+raw_dat <- data <-  data_ag                                   
+
+## -------------------------------------------------------------
+fit_list  <- list()
+pred_list <- list() 
+data$GID<- as.character(data$GID)
+## -----------------------------------------------------------------
+for (tr in traits) {
+
+  fits_vi <- list()
+
+  for (e in envs) {
+    
+          dat_sub <- raw_dat %>%
+        filter(Env == e,
+               !is.na(.data[[tr]])) %>%
+        mutate(
+          GID = factor(GID),
+          Row = factor(Row),
+          Col = factor(Column)
+        )
+
+      ## model -----------------------------------------------------------------
+      mod <- tryCatch(
+        asreml(
+          fixed    = reformulate("GID", response = tr),   #
+          random   = ~Row + ~Column,
+          residual = ~ units,              
+          data     = dat_sub
+        ),
+        error = function(err) {
+          message("asreml failed for ", tr, " | ", e,
+                  " : ", err$message)
+          NULL
+        }
+      )
+
+      ## store fit -------------------------------------------------------------
+      fits_vi[[paste(e,  sep = "_")]] <- mod
+
+      ## predictions -----------------------------------------------------------
+      if (!is.null(mod)) {
+        pred <- predict(mod,
+                        classify = "GID")$pvals %>%
+          as_tibble() %>%
+          transmute(
+            VI          = tr,
+            Env = e,
+            GID,
+            Predicted   = predicted.value,
+            SE          = std.error
+          )
+
+        pred_list[[length(pred_list) + 1]] <- pred
+      }
+  }   # environment loop
+
+  fit_list[[tr]] <- fits_vi
+}     # trait loop
+
+## -----------------------------------------------------------------
+##  tidy table of all predictions
+## -----------------------------------------------------------------
+preds <- bind_rows(pred_list)
+table(preds$VI, preds$Env)
+##  optional saves
+save(fit_list, file = "data/ag_BLUE_spatial_fits.RData")
+save(preds,  file = "data/ag_BLUE_spatial.RData")
+```
+
+
+
+## **6. Fit simple BLUP model for MQ**
+
+```{r}
+envs    <- c("MCG23","HELF24")#, "MCG25")
+traits <- colnames(data_mq)[4:15]
+
+#data_mq<- left_join(data_mq, data_ag[,c(2,5,6)], by= "plot_id")
+raw_dat <- data <-  data_mq %>% na.omit() %>% droplevels()
+str(raw_dat)
+## -------------------------------------------------------------
+fit_list  <- list()   
+pred_list <- list()
+data$GID<- as.character(data$GID)
+
+## -----------------------------------------------------------------
+
+for (tr in traits) {
+
+  fits_vi <- list()
+
+  for (e in envs) {
+    
+          dat_sub <- raw_dat %>%
+        filter(Env == e) %>%
+        mutate(
+          GID = factor(GID),
+          Row = factor(Row),
+          Col = factor(Column)
+        )
+
+      ## model -----------------------------------------------------------------
+      mod <- tryCatch(
+        asreml(
+          fixed    = reformulate("1", response = tr),   #  ~ 1
+          random   = ~GID + ~ar1(Row):ar1(Column),                             # genotype effect
+          residual = ~ units,               # spatial correction
+          data     = dat_sub
+        ),
+        error = function(err) {
+          message("asreml failed for ", tr, " | ", e,
+                  " : ", err$message)
+          NULL
+        }
+      )
+
+      ## store fit -------------------------------------------------------------
+      fits_vi[[paste(e,  sep = "_")]] <- mod
+
+      ## predictions -----------------------------------------------------------
+      if (!is.null(mod)) {
+  pred <- tryCatch({
+    predict(mod, classify = "GID")$pvals %>%
+      as_tibble() %>%
+      transmute(
+        VI        = tr,
+        Env       = e,
+        GID,
+        Predicted = predicted.value,
+        SE        = std.error
+      )
+  },
+  error = function(err) {
+    message("asreml predict failed for ", tr, " | ", e,
+            " : ", err$message)
+    NULL
+  })
+
+  if (!is.null(pred)) {
+    pred_list[[length(pred_list) + 1]] <- pred
+  }
+}
+  }   # environment loop
+
+  fit_list[[tr]] <- fits_vi
+}     # trait loop
+
+## -----------------------------------------------------------------
+##  tidy table of all predictions
+## -----------------------------------------------------------------
+preds <- bind_rows(pred_list)
+table(preds$Env)
+##  optional saves
+save(fit_list, file = "data/mq_BLUP_spatial_fits.RData")
+save(preds,  file = "data/mq_BLUP_spatial.RData")
+```
+
+
+
+## **7. Create a VI matrix of VI BLUPS. **
+
+```{r}
+load("spec_BLUE_spatial.RData")
+
+VImats <- list()
+multi<- preds
+VIs <- unique(multi$VI)
+# Prepare an empty list to hold pivoted data per environment
+VImats <- list()
+
+str(multi)
+
+
+# Step 1: Make the dataframe wider so each VI is a column
+multi_wide <- multi[,1:5] %>%
+  pivot_wider(
+    names_from = VI,
+    values_from = Predicted
+  )
+
+VImats <- list()
+
+for (e in unique(multi_wide$Env)) {
+  VImats[[e]] <- list()
+  for (i in VIs) {
+    subdata <- multi_wide[multi_wide$Env == e, c("Timepoint", i, "GID")]
+    wide_df <- tidyr::pivot_wider(
+      data        = subdata,
+      names_from  = Timepoint,
+      values_from = i
+    )
+    VImats[[e]][[i]] <- wide_df
+  }
+}
+
+wide_list <- multi_wide %>%
+  group_split(Env) %>%
+  set_names(unique(multi_wide$Env)) %>%
+  map(~ pivot_wider(.x,
+                    id_cols = GID,
+                    names_from = Timepoint,
+                    values_from = c(NDVI, PSRI),
+                    names_glue = "{.value}_TP{Timepoint}"
+  ))
+
+
+VImats$MCG25[["combined"]]<- wide_list$MCG25
+VImats$HELF24[["combined"]]<- wide_list$HELF24
+VImats$MCG23[["combined"]]<- wide_list$MCG23
+VImats$SNY22[["combined"]]<- wide_list$SNY22
+VImats$KET21[["combined"]]<- wide_list$KET21
+save(VImats, file= "data/VImatBLUE.Rdata")
+```
+

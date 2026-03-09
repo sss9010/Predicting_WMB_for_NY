@@ -1,0 +1,21 @@
+---
+title: "Home"
+site: workflowr::wflow_site
+output:
+  workflowr::wflow_html:
+    toc: false
+editor_options:
+  chunk_output_type: console
+---
+
+Welcome to my research website.
+This webpage covers the NY winter malting barely project data analysis. 
+
+
+1. PRE PROCESSING AND QC
+
+[Quality control and merging datasets](1.-Multi_spec_processingQC.html)
+
+[Raw Sepctral data QC and Spatial Correlation Plots ](Spectral_data_plots.html)
+
+[Raw Agronomic Data QC and Spatial Correlation Plot]("Agronomic_data_plots.html")

@@ -1,0 +1,16 @@
+PLINK v1.90b6.26 64-bit (2 Apr 2022)
+Options in effect:
+  --file /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL/PLINK_080822_0733
+  --out /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL/
+  --recode vcf
+
+Hostname: karl-XPS-13-9370
+Working directory: /home/karl/Downloads/plink_linux_x86_64_20220402
+Start time: Tue Aug  9 10:46:41 2022
+
+Random number seed: 1660056401
+15703 MB RAM detected; reserving 7851 MB for main workspace.
+Error: Failed to open
+/home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL/PLINK_080822_0733.map.
+
+End time: Tue Aug  9 10:46:41 2022

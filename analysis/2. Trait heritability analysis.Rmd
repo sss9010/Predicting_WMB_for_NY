@@ -1,0 +1,1089 @@
+---
+title: "2. Trait heritability analysis"
+author: "sss322"
+date: "2025-04-11"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning=FALSE, results = "hide")
+```
+
+
+## **Introduction**
+This document provides cotains the heritability calculation for multi-spectral drone imagery vegetative indices, maltinq quality and agronomic traits. The goal is to assess the heritability of all traits and choose the ones to proceed with.
+
+
+## **0. Import packages and data**
+```{r, message=FALSE}
+pkgs <- c("MASS","dplyr","tidyr","asreml","ASRtriala","ASRgenomics",
+          "ggplot2","openxlsx","workflowr","readxl", "forcats", "scales")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+```
+
+```{r}
+paths <- c("C:/Users/Siim Sepp/NY_WMB/data",
+           "~/Documents/GitHub/NY_WMB/data",
+           "data")
+
+files <- c("data_ag.Rdata","data_mq.Rdata","data_sp.Rdata","VImat.Rdata")
+
+load_first <- function(fname, dirs = paths) {
+  for (d in dirs) {
+    p <- file.path(path.expand(d), fname)
+    if (file.exists(p)) { load(p, envir = .GlobalEnv); return(invisible(p)) }
+  }
+  stop("File not found in any known location: ", fname)
+}
+invisible(lapply(files, load_first))
+```
+
+
+
+
+
+## **2. Calculating heritabilites.** 
+
+
+### **Calculating heritability for agronomic traits**
+```{r, message=FALSE}
+#Select traits and environments
+data_ag<- data_ag %>% arrange(Env)
+traits <- colnames(data_ag)[7]
+envs   <- levels(data_ag$Env)[1:2]
+data<- data_ag 
+data$GID<- as.character(data$GID)
+
+#######################################################
+#Braod sense heritability for GY 21 and 24
+######################################################
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+    # Center the trait by subtracting its mean (within env)
+    data_sub[[tr]] <- data_sub[[tr]] - mean(data_sub[[tr]], na.rm = TRUE)
+    # Fit the model
+    mod_M1 <- tryCatch({
+      asreml(
+        fixed    = as.formula(paste(tr, "~  1")),
+        random   = ~ GID  +  ~ar1(Row):ar1(Column),,
+        residual = ~ units,
+        data     = data_sub   )
+    }, error = function(err) {
+      
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+    # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    plot(mod_M1)
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1]  + vc[2, 1]+ vc[5, 1]/r)
+
+    } else {
+      ratio_env[i] <- NA
+    }
+  }
+  model_list[[tr]] <- model_env
+  ratio_list[[tr]] <- ratio_env
+}
+# Create a data frame from the ratio_list
+ratio_df <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+
+
+#######################################################
+#Broad sense heritability for GY 22, 23 and 25
+######################################################
+envs   <- levels(data_ag$Env)[3:5]
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+    # Center the trait by subtracting its mean (within env)
+    data_sub[[tr]] <- data_sub[[tr]] - mean(data_sub[[tr]], na.rm = TRUE)
+    
+    # Fit the model
+    mod_M1 <- tryCatch({
+      
+      asreml(
+        fixed    = as.formula(paste(tr, "~  Row + Column")),
+        random   = ~ GID,
+        residual = ~ units,
+        data     = data_sub   )
+      
+          }, error = function(err) {
+            message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+        # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    plot(mod_M1)
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      print(r)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1]  + vc[2, 1]/r)
+    } else {
+      ratio_env[i] <- NA
+    }  }
+  # Store all environment-specific models for this trait
+  model_list[[tr]] <- model_env
+  # Store the vector of ratio values across environments
+  ratio_list[[tr]] <- ratio_env
+}
+
+
+# Create a data frame from the ratio_list
+ratio_df1 <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+
+H2ag<-rbind(ratio_df, ratio_df1)
+```
+
+
+### **Calculating heritability for heading traits**
+```{r, message=FALSE}
+#Select traits and environments
+traits <- colnames(data_ag)[c(8,9)]
+envs   <- levels(data_ag$Env)
+
+#######################################################
+#Broad sense heritability for HD 21-25
+######################################################
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+    # Fit the model
+    mod_M1 <- tryCatch({
+      asreml(
+        fixed    = as.formula(paste(tr, "~ 1")),
+        random   = ~ GID + ~ar1(Row):ar1(Column),
+        residual = ~ units,
+        data     = data_sub   )
+    }, error = function(err) {
+      
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+    # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    plot(mod_M1)
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1] + vc[5, 1]/r)
+
+    } else {
+      ratio_env[i] <- NA
+    }
+  }
+  model_list[[tr]] <- model_env
+  ratio_list[[tr]] <- ratio_env
+}
+# Create a data frame from the ratio_list
+ratio_df1 <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+
+H2ag <-rbind(H2ag, ratio_df1)
+colnames(H2ag)[3]<- "H2"
+H2ag$H2<- round(H2ag$H2, 2)
+H2ag$h2<- "NA"
+H2ag$H2[7]<- 0
+```
+
+
+
+### **Calculating narrow sense heritability for ag traits**
+```{r, message=FALSE}
+#Select traits and environments
+traits <- colnames(data_ag)[7:9]
+envs   <- levels(data_ag$Env)
+
+#######################################################
+#Narrow sense heritability  21-25
+######################################################
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    load("data/geno/WMB_master_geno.RData")
+    indp = data_sub$GID %in% rownames(A1)
+    data_sub = data_sub[indp,]
+    indg = rownames(A1) %in% data_sub$GID
+    A1 = A1[indg, indg]
+    Ghat.bend <- G.tuneup(G = A1, bend = TRUE, eig.tol = 1e-03)$Gb
+    Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+    ASRgenomics::match.kinship2pheno(K = A1, pheno.data = data_sub, indiv = "GID")
+    data_sub$GID <- as.factor(data_sub$GID)
+    
+    # Fit the model
+    mod_M1 <- tryCatch({
+      asreml(
+        fixed    = as.formula(paste(tr, "~ 1")),
+        random   = ~ vm(GID, Ginv.sparse) + ~ar1(Row):ar1(Column),
+        residual = ~ units,
+        data     = data_sub   )
+    }, error = function(err) {
+      
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+    # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    plot(mod_M1)
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1] + vc[5, 1]/r)
+
+    } else {
+      ratio_env[i] <- NA
+    }
+  }
+  model_list[[tr]] <- model_env
+  ratio_list[[tr]] <- ratio_env
+}
+# Create a data frame from the ratio_list
+ratio_df1 <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+
+H2ag$h2<- ratio_df1$Ratio
+H2ag1<- H2ag
+```
+
+
+### **Heritability for MQ traits**
+```{r}
+data_mq$Env<- as.character(data_mq$Env)
+data<- data_mq
+data$Env<- as.factor(data$Env)
+traits <- colnames(data_mq)[c(4:15)]
+envs   <- levels(data$Env)#
+
+#######################################################
+#Broad sense heritability for MQ 23-24
+######################################################
+ratio_rows <- list()
+
+for (tr in traits) {
+  model_env <- list()
+  
+  for (e in envs) {
+    data_sub <- data %>%
+      filter(Env == e) %>%
+      filter(.data[[tr]] > 0)
+    data_sub<- data_sub %>% filter(!Fam == "NA") %>% filter(!GID == "NA")
+    data_sub$Fam<- as.factor(data_sub$Fam)
+    # Preprocessing as before...
+    load("data/geno/WMB_master_geno.RData")
+    indp = data_sub$GID %in% rownames(A1)
+    data_sub = data_sub[indp,]
+    indg = rownames(A1) %in% data_sub$GID
+    A1 = A1[indg, indg]
+    Ghat.bend <- G.tuneup(G = A1, bend = TRUE, eig.tol = 1e-03)$Gb
+    Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+    ASRgenomics::match.kinship2pheno(K = A1, pheno.data = data_sub, indiv = "GID")
+    data_sub$GID <- as.factor(data_sub$GID)
+    
+    # Center trait
+    data_sub[[tr]] <- data_sub[[tr]] - mean(data_sub[[tr]], na.rm = TRUE)
+    
+    mod_M1 <- tryCatch({
+      asreml(
+        fixed    = as.formula(paste(tr, "~ 1")),
+        random   = ~ vm(GID, Ginv.sparse) + ~Fam,
+        residual = ~ units,
+        data     = data_sub,
+        ai.sing  = TRUE
+      )
+    }, error = function(err) {
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      return(NA)
+    })
+    
+    model_env[[e]] <- mod_M1
+    
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      r <- mean(table(data_sub$GID))
+      H2 <- (vc[1, 1] + + vc[2, 1]) / (vc[1, 1] + vc[2, 1] + vc[3, 1] / r)
+      h2 <- vc[1, 1]  / (vc[1, 1] + vc[2, 1] + vc[3, 1] / r)
+      
+      ratio_rows[[length(ratio_rows) + 1]] <- data.frame(
+        Trait = tr,
+        Environment = e,
+        H2 = H2,
+        h2 = h2
+      )
+    }
+  }
+  
+  model_list[[tr]] <- model_env
+}
+
+# Combine all rows into a single data frame
+H2mq <- bind_rows(ratio_rows)
+H2mq$H2<- round(H2mq$H2, 2)
+H2mq$h2<- round(H2mq$h2, 2)
+```
+
+
+
+
+### **Heritability for spectral traits**
+```{r}
+data<- merge(data_sp, data_ag[,c(1,5,6)], by= "plot_id")
+colnames(data)[4]<- "timepoint"
+traits <- colnames(data)[5:13][c(1,9)]
+data$Env<- as.factor(data$Env)
+envs   <- levels(data$Env)[-2]
+data$GID<- as.character(data$GID)
+
+# Prepare lists to store models and ratio values
+model_list <- list()
+ratio_list <- list()
+
+#######################################################
+#Broad sense heritability for VI 22-25
+######################################################
+## ------------------------------------------------------------------
+## outer loop : traits
+## ------------------------------------------------------------------
+for (tr in traits) {
+
+  model_env  <- list()
+  ratio_env  <- list()
+
+  ## ---------------------------------------------------------------
+  ## middle loop : environments
+  ## ---------------------------------------------------------------
+  for (e in envs) {
+
+    data_env <- data %>% 
+      filter(Env == e, .data[[tr]] > 0)           # keep only positive values
+
+    ## nothing to do if env has no data for this trait
+    if (nrow(data_env) == 0) next
+
+    ## time‑points present in this env × trait subset
+    tps <- sort(unique(data_env$timepoint))
+    
+
+    model_tp <- list()
+    ratio_tp <- numeric(length(tps))
+
+    ## ------------------------------------------------------------
+    ## inner loop : time‑points
+    ## ------------------------------------------------------------
+    for (j in seq_along(tps)) {
+
+      tp <- tps[j]
+
+      data_sub <- data_env %>% 
+        filter(timepoint == tp) %>% 
+        mutate(
+          GID      = factor(GID),
+          !!tr     := .data[[tr]] - mean(.data[[tr]], na.rm = TRUE)  # centre
+        )
+
+
+      mod_M1 <- tryCatch(
+        asreml(
+          fixed    = reformulate("1", response = tr),
+          random   = ~GID +  ~ar1(Row):ar1(Column),
+          residual = ~ units,
+          data     = data_sub,
+          ai.sing  = TRUE
+        ),
+        error = function(err) {
+          message("Error fitting trait ", tr,
+                  " | env ", e, " | tp ", tp, "\n  ",
+                  err$message)
+          NA
+        }
+      )
+
+      model_tp[[as.character(tp)]] <- mod_M1
+
+      ## --------- variance ratio if model converged ---------------
+      if (inherits(mod_M1, "asreml")) {
+        vc          <- summary(mod_M1)$varcomp
+        rep_counts  <- table(data_sub$GID)
+        r           <- mean(rep_counts)
+        ratio_tp[j] <- vc[1, 1] / (vc[1, 1] + vc[5, 1] / r)
+      } else {
+        ratio_tp[j] <- NA
+      }
+    } # end time‑point loop
+
+    names(model_tp) <- names(ratio_tp) <- as.character(tps)
+    model_env [[e]] <- model_tp
+    ratio_env [[e]] <- ratio_tp
+  } # end environment loop
+
+  model_list[[tr]] <- model_env
+  ratio_list[[tr]] <- ratio_env
+} # end trait loop
+
+## ------------------------------------------------------------------
+## flatten the ratio_list to a data‑frame
+## ------------------------------------------------------------------
+ratio_df <- purrr::imap_dfr(ratio_list, ~{
+  tr_name <- .y
+  purrr::imap_dfr(.x, ~{
+    env_name <- .y
+    tibble(
+      Trait       = tr_name,
+      Environment = env_name,
+      Timepoint   = as.numeric(names(.x)),
+      Ratio       = .x
+    )
+  })
+})
+
+H2sp <- ratio_df
+
+
+
+#######################################################
+#Broad sense heritability for VI 21
+######################################################
+envs   <- levels(data$Env)[2]
+data$GID<- as.character(data$GID)
+
+# Prepare lists to store models and ratio values
+model_list <- list()
+ratio_list <- list()
+
+## ------------------------------------------------------------------
+## outer loop : traits
+## ------------------------------------------------------------------
+for (tr in traits) {
+
+  model_env  <- list()
+  ratio_env  <- list()
+
+  ## ---------------------------------------------------------------
+  ## middle loop : environments
+  ## ---------------------------------------------------------------
+  for (e in envs) {
+
+    data_env <- data %>% 
+      filter(Env == e, .data[[tr]] > 0)           # keep only positive values
+
+    ## nothing to do if env has no data for this trait
+    if (nrow(data_env) == 0) next
+
+    ## time‑points present in this env × trait subset
+    tps <- sort(unique(data_env$timepoint))
+    
+
+    model_tp <- list()
+    ratio_tp <- numeric(length(tps))
+
+    ## ------------------------------------------------------------
+    ## inner loop : time‑points
+    ## ------------------------------------------------------------
+    for (j in seq_along(tps)) {
+
+      tp <- tps[j]
+
+      data_sub <- data_env %>% 
+        filter(timepoint == tp) %>% 
+        mutate(
+          GID      = factor(GID),
+          !!tr     := .data[[tr]] - mean(.data[[tr]], na.rm = TRUE)  # centre
+        )
+
+
+      mod_M1 <- tryCatch(
+        asreml(
+          fixed    = reformulate("1", response = tr),
+          random   = ~GID ,#+  ~ar1(Row):ar1(Column),
+          residual = ~ units,
+          data     = data_sub,
+          ai.sing  = TRUE
+        ),
+        error = function(err) {
+          message("Error fitting trait ", tr,
+                  " | env ", e, " | tp ", tp, "\n  ",
+                  err$message)
+          NA
+        }
+      )
+
+      model_tp[[as.character(tp)]] <- mod_M1
+
+      ## --------- variance ratio if model converged ---------------
+      if (inherits(mod_M1, "asreml")) {
+        vc          <- summary(mod_M1)$varcomp
+        rep_counts  <- table(data_sub$GID)
+        r           <- mean(rep_counts)
+        ratio_tp[j] <- vc[1, 1] / (vc[1, 1] + vc[2, 1] / r)
+        #ratio_tp[j] <- vc[1, 1] / (vc[1, 1] + vc[5, 1] / r)
+      } else {
+        ratio_tp[j] <- NA
+      }
+    } # end time‑point loop
+
+    names(model_tp) <- names(ratio_tp) <- as.character(tps)
+    model_env [[e]] <- model_tp
+    ratio_env [[e]] <- ratio_tp
+  } # end environment loop
+
+  model_list[[tr]] <- model_env
+  ratio_list[[tr]] <- ratio_env
+} # end trait loop
+
+## ------------------------------------------------------------------
+## flatten the ratio_list to a data‑frame
+## ------------------------------------------------------------------
+ratio_df <- purrr::imap_dfr(ratio_list, ~{
+  tr_name <- .y
+  purrr::imap_dfr(.x, ~{
+    env_name <- .y
+    tibble(
+      Trait       = tr_name,
+      Environment = env_name,
+      Timepoint   = as.numeric(names(.x)),
+      Ratio       = .x
+    )
+  })
+})
+
+H2sp <- rbind(H2sp, ratio_df)
+###########################################################################################################
+colnames(H2sp)
+colnames(H2sp)[4]<- c("H2")
+H2sp$h<- "NULL"
+H2sp$H2 <- round(H2sp$H2, 2)
+```
+
+
+
+### **Heritability for the PC-s**
+```{r, eval=TRUE}
+load("data/F_PCA_scoresG.Rdata")
+F_PC_scores<- merge(PCA_scores_df, FPCA_scores_df, by= c("Env","VI", "plot_id"))
+colnames(F_PC_scores)
+F_PC_scores<- F_PC_scores[,c(1:6,13:15)]
+# Assuming your dataframe is called df_pcs
+F_PC_wide <- F_PC_scores %>%
+  pivot_longer(
+    cols = contains("PC"),
+    names_to = "Component",
+    values_to = "Loadings"
+  ) %>%
+  unite("VI_Component", VI, Component, sep = "_") %>%
+  pivot_wider(
+    names_from = VI_Component,
+    values_from = Loadings
+  )
+
+
+df_ag <- merge(data_ag, F_PC_wide, by= c("plot_id", "Env"))
+data_ag<- df_ag %>% arrange(Env)
+
+#Select traits and environments
+traits <- colnames(F_PC_wide)[c(33:38, 45:50)]
+envs   <- unique(df_ag$Env)
+data<- data_ag 
+#######################################################
+#Broad sense heritability for FPCA and PCA 22 and 25
+######################################################
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+
+    
+    # Center the trait by subtracting its mean (within env)
+    data_sub[[tr]] <- data_sub[[tr]] - mean(data_sub[[tr]], na.rm = TRUE)
+    
+    # Fit the model
+    mod_M1 <- tryCatch({
+      
+      asreml(
+        fixed    = as.formula(paste(tr, "~ 1")),
+        random   = ~ GID + ~ar1(Row):ar1(Column),
+        residual = ~ units,
+        data     = data_sub,
+        ai.sing  = TRUE   # Helps diagnose singularities
+      )
+      
+      
+    }, error = function(err) {
+      
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+    
+    # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      print(r)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1] + vc[5, 1]/r)
+    } else {
+      ratio_env[i] <- NA
+    }
+  }
+  
+  # Store all environment-specific models for this trait
+  model_list[[tr]] <- model_env
+  # Store the vector of ratio values across environments
+  ratio_list[[tr]] <- ratio_env
+}
+
+# Create a data frame from the ratio_list
+ratio_df <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+
+H2PC1 <- ratio_df
+
+#######################################################
+#Broad sense heritability for FPCA and PCA 21, 23, 24
+#######################################################
+
+envs   <- unique(df_ag$Env)[c(1,3,4)]
+data<- data_ag 
+
+model_list <- list()
+ratio_list <- list()
+
+# Loop over each trait
+for (tr in traits) {
+  
+  # Nested list/vector for storing results across environments
+  model_env  <- list()
+  ratio_env  <- numeric(length(envs)) 
+  
+  # Loop over each environment
+  for (i in seq_along(envs)) {
+    e <- envs[i]
+    
+    # Create a temporary subset for environment e
+    data_sub <- data %>% 
+      dplyr::filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+
+    
+    # Center the trait by subtracting its mean (within env)
+    data_sub[[tr]] <- data_sub[[tr]] - mean(data_sub[[tr]], na.rm = TRUE)
+    
+    # Fit the model
+    mod_M1 <- tryCatch({
+      
+      asreml(
+        fixed    = as.formula(paste(tr, "~ 1")),
+        random   = ~ GID ,#+ ~ar1(Row):ar1(Column),
+        residual = ~ units,
+        data     = data_sub,
+        ai.sing  = TRUE   # Helps diagnose singularities
+      )
+      
+      
+    }, error = function(err) {
+      
+      message(paste("Error fitting trait:", tr, "in environment:", e))
+      message("Error message:", err$message)
+      return(NA)
+    })
+    
+    # Store the model in a nested list
+    model_env[[e]] <- mod_M1
+    
+    # If successful, compute the variance ratio
+    if (inherits(mod_M1, "asreml")) {
+      vc <- summary(mod_M1)$varcomp
+      rep_counts <- table(data_sub$GID)
+      r <- mean(rep_counts)
+      print(r)
+      # Assuming first row is genetic and second row is residual
+      ratio_env[i] <- vc[1, 1] / (vc[1, 1] + vc[2, 1]/r)
+    } else {
+      ratio_env[i] <- NA
+    }
+  }
+  
+  # Store all environment-specific models for this trait
+  model_list[[tr]] <- model_env
+  # Store the vector of ratio values across environments
+  ratio_list[[tr]] <- ratio_env
+}
+
+# Create a data frame from the ratio_list
+ratio_df <- data.frame(
+  Trait       = rep(traits, each = length(envs)),
+  Environment = rep(envs, times = length(traits)),
+  Ratio       = unlist(ratio_list),
+  stringsAsFactors = FALSE
+)
+H2PC <- ratio_df
+H2PC<- rbind(H2PC, H2PC1)
+###########################################################################################################
+colnames(H2PC)[3]<- c("H2")
+H2PC$h<- "NULL"
+H2PC$H2<- round(H2PC$H2, 2)
+table(H2PC$Environment)
+############################################################################
+h2s<- list(H2ag, H2sp, H2mq, H2PC)
+writexl::write_xlsx(h2s, path= "heritabilites.xlsx")
+save(H2sp, H2ag, H2mq, H2PC, file = "heritabilites.Rdata")
+```
+
+
+
+
+## **3. Plots for heritability**
+
+
+```{r}
+load("C:/Users/Siim Sepp/NY_WMB/heritabilites.Rdata")
+```
+
+
+### **VI heritability**
+```{r, results='markup'}
+#Heading date
+H2sp<- H2sp %>% filter(Trait %in% c( "NDVI", "PSRI"))
+H2sp<- H2sp %>% filter(Trait == "NDVI")
+H2sp$Environment<- as.factor(H2sp$Environment)
+
+# Desired order
+env_order <- c("KET21", "SNY22", "MCG23", "HELF24", "MCG25")
+
+# Reorder factor levels in the data frame
+H2sp <- H2sp %>%
+  mutate(Environment = factor(Environment, levels = env_order))
+
+load("data/wmb_multi_alldata.Rdata")
+#load("~/Documents/GitHub/NY_WMB/data/wmb_multi_alldata.Rdata")
+timepoint_JD <- multi[,c(1, 3, 9, 10, 30, 31)] %>%
+  distinct()  # Keep only unique combinations
+
+colnames(timepoint_JD)[1] <- "Environment"
+
+H2sp <- H2sp %>%
+  left_join(timepoint_JD, by = c("Environment","Timepoint"))
+
+summary(H2sp)
+H2sp$JD<- as.numeric(H2sp$DAS)
+###############################################################################
+H2sp_summary <- H2sp %>%
+  group_by(Environment, Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+
+
+H2sp_summary1 <- H2sp1 %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+
+H2sp1<- H2sp %>% filter(H2 > 0)
+
+#######################################################################
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+H2sp
+H2sp<- H2sp %>% arrange(Trait,Environment,  Timepoint)
+#H2sp$Timepoint[13:21] <- H2sp$Timepoint[13:21] - 11
+#H2sp$Timepoint[1:12] <- H2sp$Timepoint[1:12] - 1
+
+H2sp$Timepoint[13:24] <- H2sp$Timepoint[13:24] - 1
+H2sp$Timepoint[25:33] <- H2sp$Timepoint[25:33] - 11
+H2sp$Timepoint[45:54] <- H2sp$Timepoint[45:54] - 1
+H2sp$Timepoint[55:58] <- H2sp$Timepoint[55:58] - 11
+
+H2sp <- H2sp %>%  mutate( Environment = trimws(as.character(Environment)),
+    Environment = fct_relevel(Environment, env_order)  
+  )
+
+ggplot(H2sp, aes(x = Timepoint, y = H2, fill = Environment)) +
+  geom_col() +
+  scale_fill_manual(values = pal, drop =  FALSE) +
+  facet_grid(Trait~Environment, scales= "free_x") +
+  labs(x = "Flight", y = "H") +
+  scale_y_continuous(breaks = c(0, 0.25,0.5, 0.75, 1)) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),  legend.position = "bottom"
+  )
+
+ggplot(H2sp, aes(x = Environment, y = H2)) +
+  geom_boxplot() +
+  scale_fill_manual(values = pal, drop =  FALSE) +
+  facet_grid(~Trait, scales= "free_x") +
+  labs(x = "Flight", y = "H") +
+  scale_y_continuous(breaks = c(0, 0.25,0.5, 0.75, 1)) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),  legend.position = "bottom"
+  )
+```
+
+
+
+### **MQ and ag heritability**
+```{r, results='markup'}
+str(H2ag)
+str(H2mq)
+H2ag<- H2ag[,-4]
+H2mq<- H2mq[,-4]
+H2s<- rbind(H2ag,H2mq)
+
+unique(H2ag$Trait) 
+
+trait_map <- c(
+  "winter_survival"  = "WS",
+  "KernelWeight.mg." = "KW",
+  "on6.64...."       = "on6/64", 
+  "MaltExtract..."   = "ME",
+  "BarleyProtein..." = "BP",
+  "WortProtein..."   = "WP",
+  "S.T"              = "S.T", 
+  "DP..ASBC."       = "DP", 
+  "Alpha.amylase.20.DU." = "AA", 
+  "Beta.glucan.ppm." = "BG",
+  "HD_JD" = "HD", 
+  "yield_kgha" = "GY", 
+  "FAN.ppm."         = "FAN", 
+  "AdjunctQualityScore" = "Adj.Sc",
+  "All_MaltQualityScore" = "All.Sc")
+
+
+H2s <- H2s %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "violet",
+  HELF24 = "lightblue3", 
+  MCG25 = "grey"
+)
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+
+trait_order<- c( "GY" , "HD",  "WS", "KW", "on6/64" , "FAN" , "DP", "AA", "S.T" , "BG" , "ME",  "BP", "WP", "Adj.Sc", "All.Sc" )
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+H2s <- H2s %>%  mutate( Environment = trimws(as.character(Environment)),
+    Environment = fct_relevel(Environment, env_order)  
+  ) %>% mutate( Trait= trimws(as.character(Trait)),
+    Trait = fct_relevel(Trait, trait_order)  
+  )
+
+H2s$H2 <- as.numeric(H2s$H2)
+
+ggplot(H2s, aes(x=Environment,  y = H2, fill = Environment)) +
+  geom_col()+
+  scale_fill_manual(values= pal, drop= FALSE)+
+  facet_grid(~Trait, scales= "free_x") +
+  labs(x = "Environment", y = "H^2") +
+  scale_y_continuous(breaks = c(0, 0.25,0.5, 0.75, 1)) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 8, angle = 90),
+        legend.position = "bottom"
+  )
+
+
+H2s<- H2s %>% filter(!Trait == "All.Sc")
+
+ggplot(H2s, aes(x=Environment,  y = h2, fill = Environment)) +
+  geom_col()+
+  scale_fill_manual(values= pal, drop= FALSE)+
+  facet_grid(~Trait, scales= "free_x") +
+  labs(x = "Environment", y = "H^2") +
+  scale_y_continuous(breaks = c(0, 0.25,0.5, 0.75, 1)) +
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 16),
+    axis.text  = element_text(size = 12, angle = 90,), 
+    legend.position = "bottom"
+  )
+
+
+H2s_summary <- H2s %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    max_H = max(H2, na.rm = TRUE),
+    mean_h = mean(h2, na.rm = TRUE),
+    min_h = min(h2, na.rm = TRUE), 
+    max_h = max(h2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(mean_H)
+
+
+H2sp_summary1 <- H2sp1 %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+
+```
+
+
+
+###  **Plots for PC and FPC heritability**
+```{r, results='markup'}
+#Broad sene heritability of VI_PC-s over Envs. 
+H2PC$Environment <- factor(H2PC$Environment, levels = env_order)
+H2PC<- H2PC %>% arrange(Environment)
+ips <- unique(H2PC$Trait)[31:36]
+H2PC<- H2PC %>% filter(Trait %in% ips)
+
+ggplot(H2PC, aes(x = Trait, y = H2, fill = Environment)) +
+  geom_col() +
+  scale_fill_manual(values = pal, drop =  FALSE) +
+  facet_grid(~Environment, scales = "free") +
+  labs(x = "Trait", y = "H") +
+  scale_y_continuous(breaks = c(0, 0.25,0.5, 0.75, 1)) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 10, angle = 90),  legend.position = "bottom"
+  )
+```
+

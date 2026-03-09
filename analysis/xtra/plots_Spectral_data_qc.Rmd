@@ -1,0 +1,155 @@
+---
+title: "Spectral_data_plots"
+author: "sss322"
+date: "2025-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Importing packages
+```{r, message=FALSE}
+library(ASRtriala)
+library(dplyr)
+library(ggplot2)
+```
+
+Importing the dataset
+```{r, message=FALSE}
+load(file= "data/wmb_multi_alldata.Rdata")
+```
+
+## 1. Histograms for each Timepoint of each colorband. 
+```{r, echo=FALSE}
+multi$Env <- as.factor(multi$Env)
+# Define indices and environment levels
+indices <- c("red_edge", "green", "blue", "red", "nir")
+env_levels <- levels(multi$Env)
+
+# Loop over each environment and index
+for (env in env_levels) {
+  for (index in indices) {
+    # Subset data for the current environment
+    data_subset <- multi[multi$Env == env, ]
+    
+    # Create histogram
+    histogram <- ggplot(data_subset, aes(.data[[index]])) +
+      geom_histogram(binwidth = 0.01, fill = "skyblue", color = "black") +
+      facet_wrap(~ JD) +
+      labs(x = index, y = "Count", title = paste("Histogram of", index, "for Each Timepoint in", env)) +
+      theme_minimal()
+    
+    # Print the histogram
+    print(histogram)
+  }
+}
+```
+
+
+ 
+## 2. Boxplots of each VI over time
+```{r, echo=FALSE}
+indices <- c("NDVI", "NDRE", "EVI", "GDVI", "NRI", "SAVI", "ENDVI", "GIPVI", "PSRI")
+
+multi_long <- multi %>%
+  tidyr::pivot_longer(
+    cols = all_of(indices), # Columns to pivot
+    names_to = "VI",     # New column for index names
+    values_to = "Value"     # New column for index values
+  )
+  # Create a faceted plot
+
+multi_long1<- multi_long %>% filter(VI == "NDVI") 
+ggplot(multi_long1, aes(x = JDf, y = Value)) +
+  geom_boxplot() +
+  labs(x = "JD", y = "Value", title = "Raw Vegetative Indices Boxplots") +
+  #theme_minimal() +
+  facet_wrap("Env") +
+  theme(legend.position = "none") +
+  scale_color_manual()#+
+  #facet_wrap(~VI, scales = "free_y") # Facet by Index with independent y scales
+
+```
+
+## 3. Line plots of each VI over time
+```{r, echo=FALSE}
+
+#indices <- c("NDVI", "NDRE", "EVI", "GDVI", "NRI", "SAVI", "ENDVI", "GIPVI", "PSRI")
+indices<- c("red_edge", "green", "blue", "red","nir" )
+line_plot <- ggplot(multi, aes_string(x = "JD", y = index, group = "PLOT", color = "as.factor(PLOT)")) +
+    geom_line() +
+    facet_wrap("Env")+
+    labs(x = "JD", y = index, color = "PLOT", title = paste("Raw", index, "Over Time(Line")) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    scale_color_manual(values = rainbow(length(unique(multi$PLOT))))  
+  
+print(line_plot)
+```
+
+## 3. Smooth plots of each VI over time
+```{r, echo=FALSE, warning=FALSE}
+multi<- multi %>% filter(!JD == "35")
+# Raw index Over Time (Smooth Plot)
+smooth_plot <- ggplot(multi, aes_string(x = "JD", y = index, group = "PLOT", color = "as.factor(PLOT)")) +
+    geom_smooth(linewidth = 0.5, alpha= 0.01) +
+    facet_wrap("Env")+
+    labs(x = "JD", y = index, color = "PLOT", title = paste("Raw", index, "Over Time (Smooth)")) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    scale_color_manual(values = rainbow(length(unique(multi$PLOT))))  
+  
+print(smooth_plot)
+```
+ 
+
+
+## 4. Spatial correlation setup and analysis 
+```{r, warning=FALSE}
+#Select and index to plot
+index<- "NDVI"
+# Get unique levels of Env
+env_levels <- unique(multi$Env)
+
+# Initialize an empty list to store results
+results_list <- list()
+
+# Outer loop for Env levels
+for (env in env_levels) {
+  # Filter data for the current environment
+  multi_env <- multi %>% filter(Env == env) %>% arrange(JD)
+  multi_env$GID<- as.factor(multi_env$GID)
+  
+  # Get unique dates for the current environment
+  dates <- unique(multi_env$JDf)
+  
+  # Inner loop for dates
+  for (i in dates) {
+    # Filter data for the current date
+    multi_date <- subset(multi_env, JDf == i)
+    
+    # Perform the analysis
+    result <- ASRtriala::audit.single(data = multi_date, gen = "GID", row = "Row", col = "Column", resp = index)
+    
+    # Store the result in the list with a descriptive name
+    results_list[[paste0("Env_", env, "_JD_", i, "_", index)]] <- result
+  }
+}
+
+# Printing the plots
+for (name in names(results_list)) {
+  # Access and display the trial plot for the current result
+  print(results_list[[name]]$trial.plot)
+  #print(results_list[[name]]$trial.plot$data$Env[1])
+  print(results_list[[name]]$trial.plot$data$timepoint[1])
+  #print(results_list[[name]]$trial.plot$data$JDf[1])
+  # Optionally, print a message to the console for tracking
+  cat(name, "\n")
+}
+
+# Save the results to a file
+save(results_list, file= "spatial_correlation_specs_VI_s.Rdata")
+```
+

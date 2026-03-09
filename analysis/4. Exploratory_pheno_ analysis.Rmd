@@ -1,0 +1,1401 @@
+---
+title: "4. Exploratory Phenotype analysis"
+author: "sss322"
+date: "2025-04-09"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## **Import packages and data**
+```{r, message=FALSE}
+pkgs <- c("dplyr","tidyr","readr","readxl","lubridate","stringr", "ggplot2", "forcats", "ASRtriala", "openxlsx")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/NY_WMB"
+} else {
+  "~/Documents/GitHub/NY_WMB"
+}
+
+load(file.path(base_path, "data/data_ag.Rdata"))
+load(file.path(base_path, "data/data_mq.Rdata"))
+load(file.path(base_path, "data/data_sp.Rdata"))
+Sys.setenv(LANGUAGE = "en")
+```
+
+
+
+
+# **1. Calc HD, GDD and sowing date**
+
+```{r}
+#long VI table if you need downstream
+traits <- names(data_sp)[5:13]
+data_sp_long <- tidyr::pivot_longer(data_sp, all_of(traits), names_to="trait", values_to="value")
+
+# sowing dates → map to Env and Year (Oct sowing → next spring season)
+sow_map <- tibble::tibble(
+  Environment = c("KET21","SNY22","MCG23","HELF24","MCG25"),
+  sd          = as.Date(c("2020-10-08","2021-10-11","2022-10-11","2023-10-03","2024-09-27"))
+) %>%
+  mutate(Year = year(sd) + 1)
+
+# flights (ensure Date parsed, strip trailing " UTC" if present)
+flight_d <- readxl::read_excel("data/Flights/flightdate.xlsx") %>%
+  mutate(Date = as.Date(str_remove(as.character(Date), " UTC$")))
+
+# attach sowing dates and compute days-from-sowing (JDD) and from Jan 1 (JDD1)
+JD_map <- flight_d %>%
+  left_join(sow_map, by = "Year") %>%
+  mutate(
+    JDD  = as.integer(Date - sd),
+    JDD1 = as.integer(Date - as.Date(paste0(Year, "-01-01")))
+  )
+
+# weather → daily mean temp and cumulative GDD per year
+base_temp <- 40
+weather <- readr::read_csv("data/weather_dataq_ithaca.csv", show_col_types = FALSE) %>%
+  mutate(
+    DATE    = as.Date(DATE),
+    year    = year(DATE),
+    t_avg   = (TMAX + TMIN) / 2,
+    gdd_day = pmax(t_avg - base_temp, 0)
+  ) %>%
+  arrange(year, DATE) %>%
+  group_by(year) %>%
+  mutate(GDD_cum = cumsum(gdd_day)) %>%
+  ungroup()
+
+# GDD on flight dates: join cumulative GDD by exact date & year
+JD_map <- JD_map %>%
+  left_join(weather %>% transmute(Year = year, Date = DATE, GDD = GDD_cum),
+            by = c("Year","Date"))
+
+# average HD_JD per year (use Env→Year map so it matches sow_map)
+year_map <- sow_map %>% dplyr::select(Env = Environment, Year)
+data_ag  <- data_ag %>% mutate(Env = as.character(Env)) %>% left_join(year_map, by = "Env")
+
+avg_HD_by_year <- data_ag %>%
+  group_by(Year) %>%
+  summarise(mean_HD_JD = mean(HD_JD, na.rm = TRUE), .groups = "drop") %>%
+  mutate(JD_date = as.Date(paste0(Year, "-01-01")) + mean_HD_JD)
+
+# GDD at the mean heading date (vectorized join to weather)
+avg_HD_by_year <- avg_HD_by_year %>%
+  left_join(weather %>% transmute(Year = year, JD_date = DATE, GDD_JD = GDD_cum),
+            by = c("Year","JD_date"))
+
+# merge heading-date info to flight map and compute distance from HD
+JD_map <- JD_map %>%
+  left_join(avg_HD_by_year, by = "Year") %>%
+  mutate(d_f_HD = as.integer(Date - JD_date))
+
+save(JD_map, file= "data/JDmap.Rdata")
+```
+
+```{r}
+weather <- weather %>% #filter(!year == "2020") 
+  mutate( year = year(DATE),doy = yday(DATE), month = month(DATE) ) 
+
+weather_filtered <- weather %>% filter(month(DATE) <= 6) %>% filter(month(DATE) > 3) %>% 
+  mutate( year = year(DATE), month_day = as.Date(format(DATE, "2000-%m-%d")))
+
+
+JD_map_filtered <- JD_map %>% filter(month(Date) <= 6) %>% filter(month(Date) > 3) %>% 
+  mutate( year = year(Date), month_day = as.Date(format(Date, "2000-%m-%d")), 
+          JD_date_norm = as.Date(format(JD_date, "2000-%m-%d") ))
+```
+
+
+```{r}
+# GDD and flight timepoint GDD. 
+
+JD_map_filtered[,1:2]
+
+ggplot(weather_filtered, aes(x = month_day, y = GDD_cum)) +
+  geom_line(color = "darkgreen", size= 1) +
+  geom_vline(data = JD_map_filtered, aes(xintercept = month_day), 
+             color = "red", linetype = "dashed",size= 1) +
+   geom_vline(data = JD_map_filtered, aes(xintercept = JD_date_norm), 
+             color = "black",size= 1) +
+  facet_grid(rows= vars(year))+
+  scale_x_date(
+    date_labels = "%b%d", date_breaks = "1 week",
+    limits = as.Date(c("2000-04-15", "2000-06-30"))
+  ) +
+  labs(
+   # title = "Cumulative GDD by Year with Flight Dates",
+    x = "Date",
+    y = "Cumulative GDD"
+  ) +
+  #theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 24),
+    strip.text = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.text = element_text(size=12), 
+    axis.title = element_text(size=14))
+```
+
+
+
+
+# **2. Plotting the distribution of traits**
+
+
+### *Plotting the agronomic and the MQ traits*
+
+
+```{r}
+colnames(data_ag)
+colnames(data_ag)[9]<- "WS"
+colnames(data_mq)
+dag<- data_ag[,c(1:3,7,8,9)]
+
+dmq<- data_mq[,c(2,4:15)]
+damq<- left_join(dag, dmq, by= "plot_id")
+
+traits<- colnames(damq)[c(-1,-2, -3)]
+damq$Alpha.amylase.20.DU. <- as.double(damq$Alpha.amylase.20.DU.) 
+damql<- damq  %>%
+  pivot_longer(
+    cols = all_of(traits),
+    names_to = "trait",
+    values_to = "value"
+  )
+
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+trait_map <- c(
+  "KernelWeight.mg." = "KW",
+  "on6.64...."       = "on6/64", 
+  "MaltExtract..."   = "ME",
+  "BarleyProtein..." = "BP",
+  "WortProtein..."   = "WP",
+  "S.T"              = "S.T", 
+  "DP..ASBC."       = "DP", 
+  "Alpha.amylase.20.DU." = "AA", 
+  "Beta.glucan.ppm." = "BG",
+  "HD_JD" = "HD", 
+  "yield_kgha" = "GY", 
+  "FAN.ppm."         = "FAN", 
+  "AdjunctQualityScore" = "Adj.Sc",
+  "All_MaltQualityScore" = "All.Sc")
+
+
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+
+trait_order<- c( "GY" , "HD", "WS",  "KW", "on6/64" , "FAN" , "DP", "AA", "S.T" , "BG" , "ME",  "BP", "WP", "Adj.Sc", "All.Sc" )
+
+colnames(damql)[c(3,4)] <- c("Environment", "Trait")
+damql <- damql %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+damql <- damql %>%  mutate( Environment = trimws(as.character(Environment)),
+    Environment = fct_relevel(Environment, env_order)  
+  ) %>% mutate( Trait= trimws(as.character(Trait)),
+    Trait = fct_relevel(Trait, trait_order)  
+  )
+
+
+p <- ggplot(damql, aes(x = value,  fill = Environment)) +
+    geom_density(alpha= 0.5,adjust = 1.5) +
+  scale_fill_manual(values= pal, drop= FALSE)+
+    facet_wrap(~Trait,  scales = "free", ncol=5, nrow=3) +
+    theme(legend.position = "bottom",
+    strip.text = element_text(size = 12, face = "bold"))+
+  ylab("Density") +
+  xlab("")
+
+p
+
+
+p <- ggplot(damql, aes(y = value,  fill = Environment)) +
+    geom_boxplot(alpha= 0.5) +
+  scale_fill_manual(values= pal, drop= FALSE)+
+    facet_wrap(~Trait,  scales = "free", ncol=5, nrow=3) +
+    theme(
+    strip.text = element_text(size = 12, face = "bold"))+
+  ylab("Density") +
+  xlab("")
+
+p
+
+summary(damq$HD_JD)
+
+```
+
+
+### *Plotting the spectral traits*
+```{r}
+
+colnames(JD_map)[6]<- "Env"
+colnames(JD_map)[c(2,3, 5,6,10)]
+###########################################################################################
+data_sp_long <- left_join(data_sp_long, JD_map[c(2,3, 5,6,10)], by = c("Env" ,"Timepoint" ))
+###########################################################################################
+table(data_sp_long$Env, data_sp_long$Timepoint, data_sp_long$trait)
+
+data_sub <- data_sp_long %>% filter(DAS >150) %>% filter(!trait == "GDVI") %>% filter(trait %in% c("NDVI", "PSRI"))
+
+data_sub1 <- data_sub %>%  mutate( Environment = trimws(as.character(Env)),
+    Environment = fct_relevel(Environment, env_order)  
+  ) %>% mutate( Trait= trimws(as.character(trait)),
+    Trait = fct_relevel(Trait, trait_order)  
+  )
+
+
+#Smooth plot GDD VI
+p <- ggplot(data_sub1, aes(x = GDD, y = value, color = Environment)) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, linewidth = 2, alpha = 0.5) +
+  scale_color_manual(values = pal, drop = FALSE)+
+  facet_wrap(~trait,  scales = "free_y") +
+  labs(
+    #title = paste("Smooth VI-s over locations"),
+    x = "GDD",                         
+    y = "Value",
+    fill = "Trait")+
+    #color = "Trait") +
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 22, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16), 
+    legend.position = "bottom"
+  )
+
+print(p)
+
+#Smooth plot date VI
+data_sub2 <- data_sub1 %>%
+  dplyr::mutate(Date = as.Date(sprintf("2000-%02d-%02d",
+                                       lubridate::month(Date),
+                                       lubridate::day(Date))))
+
+p <- ggplot(data_sub2, aes(x = Date, y = value, color = Environment)) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 4), se = FALSE, linewidth = 2, alpha = 0.5) +
+  scale_color_manual(values = pal, drop = FALSE)+
+  facet_wrap(~trait,  scales = "free_y") +
+  labs(
+    #title = paste("Smooth VI-s over locations"),
+    x = "Date",                         
+    y = "Value",
+    fill = "Trait")+
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 22, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16), 
+    legend.position = "bottom"
+  )
+Sys.setenv(LANGUAGE = "en")
+p
+```
+
+
+
+
+### *Plotting the histograms PC and FPC scores*
+```{r}
+load("data/F_PCA_scoresG.Rdata")
+F_PC_scores<- FPCA_scores_df
+colnames(F_PC_scores)
+
+# Assuming your dataframe is called df_pcs
+F_PC_long <- F_PC_scores %>%
+  pivot_longer(
+    cols = contains("PC"),
+    names_to = "Component",
+    values_to = "Loadings")
+
+colnames(F_PC_long)
+colnames(data_ag)
+df_ag <- left_join(F_PC_long, data_ag[,-3], by= c("plot_id"))
+df_mq <- left_join(F_PC_long, data_mq[,-3], by= c("plot_id"))
+```
+
+
+```{r}
+df_ag<- df_ag %>% arrange(Env)
+
+df_ag1 <- df_ag %>% filter(Component %in% c( "FPC1"  ,"FPC2", "FPC3")) %>% mutate( Env = fct_relevel(Env, env_order))
+
+p <- ggplot(df_ag1, aes(x = Loadings, fill = Env)) +
+    geom_density(alpha = 0.3, adjust = 1.5) +
+    facet_wrap(~Component, scales= "free") +
+  scale_fill_manual(values = pal, drop = FALSE) +
+
+    #theme_minimal() +
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 22, face = "bold"),
+     axis.text = element_text(size = 16),     
+    axis.title = element_text(size = 16),
+    legend.title = element_text(size = 16), 
+    legend.text = element_text(size = 16), 
+    legend.position = "bottom")+
+  ggtitle("") +
+  ylab("Density") +
+  xlab("")
+
+print(p)
+```
+
+
+
+
+# **3. Calculating Summary Statistics, CV and overlap**
+```{r}
+#yield
+data_ag$GID<- as.factor(data_ag$GID)
+sumst_ag <- audit.met(data_ag, gen= "GID",resp= "yield_kgha", trial= "Env")
+print(sumst_ag)
+
+#Malting quality
+traits<- colnames(data_mq)[4:15]
+data_mq$GID<- as.factor(data_mq$GID)
+data_mq$Alpha.amylase.20.DU <- as.numeric(data_mq$Alpha.amylase.20.DU.)
+str(data_mq)
+MQstats<- list()
+for (tr in traits){
+  MQstats[tr]<- audit.met(data_mq, gen= "GID",resp= tr, trial= "Env")
+}
+
+
+#Spectral data
+stats_sp<- data.frame()
+
+traits<- colnames(data_sp)[5:13]
+spec_stats <- list()
+
+data_sp$Env<- as.factor(data_sp$Env)
+
+for (tr in traits) {
+  for (e in unique(data_sp$Env)) {
+    
+
+    data_sub <- data_sp %>% filter(Env == e)
+    data_sub$GID<- as.factor(data_sub$GID)
+    data_sub$Timepoint <- as.factor(data_sub$Timepoint)
+    
+
+    result <- audit.met(data_sub, gen = "GID", resp = tr, trial = "Timepoint")
+    result$met.stats$trait<- tr
+    result$met.stats$Env<- e
+    stats_sp<- rbind(stats_sp, result$met.stats)
+  }
+}
+#str(stats_sp)
+
+stats_sp <- stats_sp %>% filter(!Env == "MCG23" & !Timepoint == "2" & !trait == "PSRI")
+boxplot(stats_sp$CVp~stats_sp$Timepoint)
+
+stats_sp$trait <- as.factor(stats_sp$trait)
+
+
+p <- ggplot(stats_sp, aes(y = CVp, group = Timepoint)) +
+      geom_boxplot(alpha = 0.2) +
+      facet_wrap(~ Env) +
+      labs(
+        title = paste("Timepoint:", "| VI:", ~Env) ) +
+      #theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 12)
+      )
+    
+print(p)
+p <- ggplot(stats_sp, aes(y = CVp, group = Timepoint)) +
+      geom_boxplot(alpha = 0.2) +
+      facet_wrap(~ trait) +
+      labs(
+        #title = paste("Timepoint:", tp, "| VI:", vi, e),
+       # x = ~timepoint,
+        #y = vi
+      ) +
+      #theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 12)
+      )
+    
+print(p)
+```
+
+
+
+
+# **4. Correlation analysis**
+
+
+### *Printing the plots per PC:Agronomic combination, all  within Envs*
+
+```{r, message=FALSE, warning=FALSE}
+######################################################################################################
+#ag traits
+######################################################################################################
+data<- df_ag
+traits<- unique(data$Component)
+ag_traits<- colnames(data)[10:11]
+
+df_long <- data %>%
+  pivot_longer(
+    cols = ag_traits,
+    names_to = "Trait",
+    values_to = "Value")
+
+corr_summary <- df_long %>%
+        group_by(Env, Component, VI, Trait) %>%
+        summarise(
+          correlation = cor(Loadings, Value, use = "complete.obs"),
+          .groups = "drop")
+cs_ag<- corr_summary
+
+# scatterplot for PC loadaing : value. wrap over componenets
+for (t in traits) {
+    df_trait_plot <- df_long %>% filter(Component == t) %>% na.omit()
+    
+    p <- ggplot(df_trait_plot, aes(x = Value, y = Loadings, color= Env, fill= Env)) +
+      geom_point(alpha = 0.12) +
+      geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.8) +
+      facet_wrap(~Trait, scales = "free_x") +
+      labs(
+        title = paste("Trait:", t),
+        x = paste(~Trait, "Value"),
+        y = "Loading"
+      ) +
+      #theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 10)
+      ) +
+      ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top")
+    
+    print(p)
+}
+
+#############################################################################################################
+#Malting quality traits
+#############################################################################################################
+data<- df_mq# %>% filter(!WortColor == "n.d.") %>% na.omit()
+
+traits<- unique(data$Component)
+mq_traits<- colnames(data)[7:18]
+# Correlation results storage
+str(data)
+df_long <- data[,c(1,2,3,4,5,7:18)] %>%
+  pivot_longer(
+    cols = mq_traits,
+    names_to = "Trait",
+    values_to = "Value")
+
+
+corr_summary <- df_long %>%
+  group_by(Env, Component, VI, Trait) %>%
+  summarise(
+    n_pair = sum(complete.cases(Loadings, Value)),
+    correlation = if (n_pair >= 2)
+      suppressWarnings(cor(Loadings, Value, use = "complete.obs"))
+    else NA_real_,
+    .groups = "drop"
+  ) %>%
+  filter(n_pair >= 2)
+
+
+cs_mq<- corr_summary
+# scatterplot for PC loadaing : value. wrap over componenets
+for (t in traits) {
+    df_trait_plot <- df_long %>% filter(Component == t) %>% na.omit()
+    
+    p <- ggplot(df_trait_plot, aes(x = Value, y = Loadings, color= Env, fill= Env)) +
+      geom_point(alpha = 0.12) +
+      geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.8) +
+      facet_wrap(~Trait, scales = "free_x") +
+      labs(
+        title = paste("Trait:", t),
+        x = paste(~Trait, "Value"),
+        y = "Loading"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 10)
+      ) +
+      ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top")
+    
+    print(p)
+}
+
+# scatterplot for PC loadaing : value. wrap over componenets and VIs
+for(i in unique(df_long$VI)){
+for (t in traits) {
+    df_trait_plot <- df_long %>% filter(Component == t) %>% filter(VI == i) %>% na.omit()
+    
+    p <- ggplot(df_trait_plot, aes(x = Value, y = Loadings, color= Env, fill= Env)) +
+      geom_point(alpha = 0.2) +
+      geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.8) +
+      facet_wrap(~Trait, scales = "free_x") +
+      labs(
+        title = paste("Trait:", t, i),
+        x = paste(~Trait, "Value"),
+        y = "Loading"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 10)
+      ) +
+      ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top")
+    
+    print(p)
+}}
+table(data_mq$Env, data_mq$Row)
+```
+
+
+
+
+### *Heatmap for PC loading and trait*
+```{r}
+#Agronomic traits and loading
+data$Env<- as.character(data$Env)
+ENVs <- unique(data$Env)
+
+heatmap_plot <- ggplot(cs_ag, aes(x = factor(Component), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~Env)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap"),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+    
+#################################################################################
+#Malting quality traits and loading
+heatmap_plot <- ggplot(cs_mq, aes(x = factor(Component), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~Env)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap"),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+
+#################################################################################
+heatmap_plot <- ggplot(cs_mq, aes(x = factor(Env), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~Component)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap"),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      #theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+```
+
+
+
+```{r}
+#differnt plots. 
+library(broom)
+######################################################################################
+data<- df_ag
+traits<- unique(data$Component)
+ag_traits<- colnames(data)[10:11]
+
+df_long <- data %>%
+  pivot_longer(
+    cols = ag_traits,
+    names_to = "Trait",
+    values_to = "Value")
+
+
+# 1) Correlations (r) and p-values per Env × Trait × Component
+corr_df <- df_long %>%
+  group_by(Env, Trait, Component) %>%
+  nest() %>%
+  mutate(
+    test = purrr::map(data, ~{
+      dd <- .x %>% drop_na(Value, Loadings)
+      if (nrow(dd) < 3) return(tibble(estimate = NA_real_, p.value = NA_real_, n = nrow(dd)))
+      ct <- cor.test(dd$Value, dd$Loadings, method = "pearson")
+      tibble(estimate = unname(ct$estimate), p.value = ct$p.value, n = nrow(dd))
+    })
+  ) %>%
+  #select(-data) %>%
+  unnest(test) %>%
+  mutate(
+    r = estimate,
+    p_adj = p.adjust(p.value, method = "BH"),
+    sig = p_adj < 0.05
+  )
+
+# 2) Heatmap (rows = Trait, cols = Component), faceted by Env
+ggplot(corr_df, aes(x = Component, y = Trait, fill = r, alpha = sig)) +
+  geom_tile(color = "grey90") +
+  # Optional: label r on tiles
+  geom_text(aes(label = ifelse(is.finite(r), sprintf("%.2f", r), "")), size = 6) +
+  scale_fill_gradient2(limits = c(-1, 1), midpoint = 0,
+                       low = "#2c7bb6", mid = "white", high = "#d7191c",
+                       name = "Pearson r") +
+  scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.35), guide = "none") +
+  facet_wrap(~ Env, scales = "free_x") +
+  labs(x = "Predictor (Component)", y = "Trait")+
+       #title = "Correlation of Trait Values vs. PCA Loadings by Environment",
+       #subtitle = "Tiles shaded by Pearson r; transparency indicates FDR significance (BH)") +
+  theme_minimal(base_size = 16) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 16)
+  )
+
+######################################################################################
+data<- df_mq# %>% filter(!WortColor == "n.d.") %>% na.omit()
+
+traits<- unique(data$Component)
+mq_traits<- colnames(data)[7:18]
+# Correlation results storage
+str(data)
+df_long <- data[,c(1,2,4,5,7:18)] %>%
+  pivot_longer(
+    cols = mq_traits,
+    names_to = "Trait",
+    values_to = "Value")
+
+
+
+# 1) Correlations (r) and p-values per Env × Trait × Component
+corr_df <- df_long %>%
+  group_by(Trait, Component) %>%
+  nest() %>%
+  mutate(
+    test = purrr::map(data, ~{
+      dd <- .x %>% drop_na(Value, Loadings)
+      if (nrow(dd) < 3) return(tibble(estimate = NA_real_, p.value = NA_real_, n = nrow(dd)))
+      ct <- cor.test(dd$Value, dd$Loadings, method = "pearson")
+      tibble(estimate = unname(ct$estimate), p.value = ct$p.value, n = nrow(dd))
+    })
+  ) %>%
+  #select(-data) %>%
+  unnest(test) %>%
+  mutate(
+    r = estimate,
+    p_adj = p.adjust(p.value, method = "BH"),
+    sig = p_adj < 0.05
+  )
+mqe<- c("MCG23", "HELF24", "MCG25")
+#corr_df<- corr_df %>% filter(Env %in% mqe)
+# 2) Heatmap (rows = Trait, cols = Component), faceted by Env
+ggplot(corr_df, aes(x = Component, y = Trait, fill = r, alpha = sig)) +
+  geom_tile(color = "grey90") +
+  # Optional: label r on tiles
+  geom_text(aes(label = ifelse(is.finite(r), sprintf("%.2f", r), "")), size = 6) +
+  scale_fill_gradient2(limits = c(-1, 1), midpoint = 0,
+                       low = "#2c7bb6", mid = "white", high = "#d7191c",
+                       name = "Pearson r") +
+  scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.35), guide = "none") +
+  #facet_wrap(~ Env, scales = "free_x") +
+  labs(x = "Predictor (Component)", y = "Trait")+
+       #title = "Correlation of Trait Values vs. PCA Loadings by Environment",
+       #subtitle = "Tiles shaded by Pearson r; transparency indicates FDR significance (BH)") +
+  theme_minimal(base_size = 16) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10)
+  )
+```
+
+
+
+```{r}
+
+load("data/ag_BLUE_spatial.RData")
+ag1<- preds
+load("data/mq_BLUP_spatial.RData")
+mq1<- preds
+load("data/spec_BLUE_spatial.RData")
+sp1<- preds
+
+mfp<- left_join(sp1, ag1, by= c("Env", "GID", "VI"))
+#Agronomic traits and loading
+data$Env<- as.character(data$Env)
+ENVs <- unique(data$Env)
+
+heatmap_plot <- ggplot(cs_ag, aes(x = factor(Component), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~Env)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap"),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+     # theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# **5. Printing the plots per VI:TP all MQ scatter plots** 
+
+```{r, message=FALSE, warning=FALSE}
+load("data/data_ag.Rdata")
+load("data/data_mq.Rdata")
+load("data/data_sp.Rdata")
+data_ag<- data_ag[c(1:2,3, 7,8, 10)]
+data_mq<- data_mq[c(2, 4:15)]
+data_sp<- data_sp[c(1,4:13)]
+data<- left_join(data_sp, data_mq, by = "plot_id")
+data<- left_join(data, data_ag, by = "plot_id")
+
+
+traits<- colnames(data_mq)[-1]
+VIs<-  colnames(data_sp)[-1:-2]
+
+df_trait_plot <- data %>% pivot_longer(
+          cols = all_of(traits),
+          names_to = "MQtrait",
+          values_to = "MQtrait_value"
+        )
+
+df_trait_plot<- df_trait_plot%>% pivot_longer(
+          cols = all_of(VIs),
+          names_to = "VI",
+          values_to = "VI_value"
+        )
+
+for (i in unique(df_trait_plot$MQtrait)) {
+  for (vi in unique(df_trait_plot$VI)) {
+
+df_trait_plot1 <- df_trait_plot %>% filter(MQtrait == i, VI == vi)
+
+p <- ggplot(df_trait_plot1, aes(x = MQtrait_value, y = VI_value, color=Env, fill= Env)) +
+      geom_point(alpha = 0.2) +
+      geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.8) +
+      facet_wrap(~Timepoint, scales = "free_x") +
+      labs(
+        title = paste(i, vi),
+        x = paste(i, "Value"),
+        y = "Vegetative Index Value"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_text(size = 10)
+      ) +
+      ggpubr::stat_cor(method = "pearson", label.x.npc = "left", label.y.npc = "top")
+    
+print(p)
+
+}}
+```
+
+
+
+
+
+
+#######################################################################################################3
+
+### *plot traits against VIs at timepoints.*
+
+```{r}
+traits<- colnames(data)[c(-1:-11,-24, -25, -28)]
+# Assuming your original data has one column per VI (wide format)
+df_long <- data %>%
+  pivot_longer(
+    cols = all_of(traits),    
+    names_to = "trait",
+    values_to = "trait_value"
+  )
+
+
+df_long_vi <- df_long %>%
+  pivot_longer(
+    cols = all_of(VIs),         
+    names_to = "VI",
+    values_to = "VI_value"
+  )
+
+unique_traits <- unique(df_long_vi$trait)
+unique_VIs <- unique(df_long_vi$VI)
+
+ENVs<- unique(df_long_vi$Env)
+ENVs<- ENVs[-3]
+df_long_vi$trait<- as.factor(df_long_vi$trait)
+
+#for (tr in unique_traits) {
+for (e in ENVs) {
+  for (vi in unique_VIs) {
+  
+  df_sub <- df_long_vi %>%
+    filter(VI == vi, Env == e)
+  
+  p <- ggplot(df_sub, aes(x = VI_value, y = trait_value)) +
+    
+    # Add separate linear model line for each timepoint
+    geom_point(alpha = 0.1, aes(group = Timepoint, color = Timepoint))+
+    geom_smooth(
+      aes(group = Timepoint, color = Timepoint, fill = Timepoint),
+      method = "lm", se = FALSE, linewidth = 0.6
+    ) +
+    facet_wrap(~ trait, scales = "free_y") +
+    
+    labs(
+      title = paste("MQ traits of timepoints of VI:", vi, "- across environment", e),
+      x = paste(vi, "value"),
+      y = vi,
+      color = "Timepoint"
+    ) +
+    
+    theme_minimal() +
+    theme(
+      strip.text = element_text(size = 6),
+      axis.text = element_text(size = 6),
+      plot.title = element_text(hjust = 0.5, size = 10),
+      legend.position = "bottom"
+    )
+  
+  print(p)
+  }}
+#}
+
+
+```
+
+
+### *Heatmap for VI and trait correlation*
+```{r}
+timepoints <- unique(data$Timepoint)
+data$Env<- as.character(data$Env)
+ENVs <- unique(data$Env)
+table(data$Env, data$Timepoint)
+# 1) make sure columns are numeric
+data <- data %>%
+  mutate(across(all_of(c(traits, VIs)), ~ suppressWarnings(as.numeric(.))))
+
+# 2) safe correlation helper
+safe_cor <- function(x, y, method = "pearson") {
+  ok <- is.finite(x) & is.finite(y) & !is.na(x) & !is.na(y)
+  if (sum(ok) < 2L) return(NA_real_)
+  if (sd(x[ok]) == 0 || sd(y[ok]) == 0) return(NA_real_)
+  suppressWarnings(cor(x[ok], y[ok], method = method))
+}
+
+# 3) compute correlations for ALL VIs at once, per Env×Timepoint×Trait
+cor_results_df <- data %>%
+  filter(Env %in% ENVs) %>%
+  pivot_longer(all_of(traits), names_to = "Trait", values_to = "TraitValue") %>%
+  group_by(Env, Timepoint, Trait) %>%
+  summarise(
+    across(all_of(VIs), ~ safe_cor(TraitValue, .x), .names = "cor_{.col}"),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(starts_with("cor_"), names_to = "VI", values_to = "correlation") %>%
+  mutate(VI = sub("^cor_", "", VI))
+
+
+table(cor_results_df$Env)
+ENVs<- unique(cor_results_df$Env)  
+
+cor_results_df1<- cor_results_df %>% filter(Env == ENVs[1])
+
+
+heatmap_plot <- ggplot(cor_results_df1, aes(x = factor(Timepoint), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~VI)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap for",  ENVs[1]),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+
+
+###########################################################    
+cor_results_df1<- cor_results_df %>% filter(Env == ENVs[2])
+
+
+heatmap_plot <- ggplot(cor_results_df1, aes(x = factor(Timepoint), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~VI)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap for", "in", ENVs[2]),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+
+cor_results_df1<- cor_results_df %>% filter(Env == ENVs[3])
+
+
+heatmap_plot <- ggplot(cor_results_df1, aes(x = factor(Timepoint), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~VI)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap for",  ENVs[3]),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+####################################################
+cor_results_df1<- cor_results_df %>% filter(Env == ENVs[4])
+
+
+heatmap_plot <- ggplot(cor_results_df1, aes(x = factor(Timepoint), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~VI)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap for",  ENVs[4]),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+####################################################
+cor_results_df1<- cor_results_df %>% filter(Env == ENVs[5])
+
+
+heatmap_plot <- ggplot(cor_results_df1, aes(x = factor(Timepoint), y = Trait, fill = correlation)) +
+      geom_tile(color = "white") +
+  facet_wrap(~VI)+
+        scale_fill_gradient2(low = "blue", high = "red", midpoint = 0, limits = c(-1, 1)) +
+        labs(
+        title = paste("Correlation Heatmap for", ENVs[5]),
+        x = "Timepoint",
+        y = "Trait",
+        fill = "r"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        axis.text = element_text(size = 10)
+      )
+print(heatmap_plot)
+```
+
+
+
+
+# **6. Summarizing correlations over VI: componenet: trait**
+
+```{r, echo= FALSE}
+ggplot(cs_mq, aes(x = Trait, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(~Component , scales = "free_y") +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+
+
+ggplot(cs_mq, aes(x = Trait, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(~VI , scales = "free_y") +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+ggplot(cs_ag, aes(x = Component, y = correlation, fill = VI)) +
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(~ Trait, scales = "free_y") +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+```
+
+
+### *env, #componenet, vi, #trait*
+```{r}
+################################################################################
+#testing the component
+ggplot(cs_ag, aes(x = Component, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+ggplot(cs_ag, aes(x = Component, y = correlation, fill = Env)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+# fill no diff: VI
+# fill diff: trait and env in FPC1 an PC1, 
+
+
+
+################################################################################
+#testing the trait
+ggplot(cs_ag, aes(x = Trait, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+ggplot(cs_ag, aes(x = Trait, y = correlation, fill = VI)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+# fill no diff: env, vi
+# fill diff:compoenent in some
+
+################################################################################
+#testing the VI
+ggplot(cs_ag, aes(x = VI, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+ggplot(cs_ag, aes(x = VI, y = correlation, fill = Trait)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+# fill no diff: env(23 and 24 have more var), trait
+# fill diff: FPC1 and PC1 have some varianc.e
+
+################################################################################
+#testing the env
+ggplot(cs_ag, aes(x = Env, y = correlation)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+ggplot(cs_ag, aes(x = Env, y = correlation, fill = VI)) +
+  geom_boxplot(outlier.size = 0.5) +
+  labs(
+    x = "FPC",
+    y = "Correlation with Trait",
+    title = "Distribution of Correlations: FPCs by VI"
+  ) +
+  #theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom")
+
+# fill no diff:VI
+# fill diff: FPC1 and PC1 have some variance,  trait(23 and 24 have more var and high cor)
+
+#23 and 22 have stronger corrs
+#env : trait
+#FPC1 PC1 better than other. 
+```
+
+
+
+### *the corrs of PCs with VIs, traits summary*
+```{r}
+
+#print(pp, n= 24)
+# Env- how a VI or componenet correaltes over years
+cs_ag %>%
+  group_by(Env, , Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation), min= min(correlation), sd= sd(correlation), n = n())%>% arrange(Trait)
+
+# VI- how a componenet or Env correaltes over VIs
+ip<- cs_ag %>%
+  group_by(VI, , Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation),min= min(correlation), sd= sd(correlation), n = n())%>% arrange(Trait)
+
+print(ip, n= 40)
+
+# Componenet- how a VI or Env correaltes over componenet
+pp<- cs_ag %>%
+  group_by(Component, Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation),  min= min(correlation), sd= sd(correlation), n = n())%>% arrange(Trait) %>% arrange(mean)
+
+cs_ag %>%
+  group_by(Component, Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation),  min= min(correlation), sd= sd(correlation), n = n())%>% arrange(Trait) %>% arrange(mean)
+
+###################################################################################################################
+# Env- how a VI or componenet correaltes over years
+ii<- cs_mq %>%
+  group_by(Env,  Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation), min= min(correlation), sd= sd(correlation), n = n())%>% arrange(Trait)
+
+print(ii, n= 34)
+
+# VI- how a componenet or Env correaltes over VIs
+ip <- cs_mq %>%
+  group_by(VI, , Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation),min= min(correlation), sd= sd(correlation), n = n()) %>% arrange(Trait)
+
+# Componenet- how a VI or Env correaltes over componenet
+ip<- cs_mq %>%
+  group_by(Component, Trait) %>%
+  summarise(mean = mean(correlation), var= var(correlation),  min= min(correlation), sd= sd(correlation), n = n()) %>% arrange(Trait) %>% arrange(mean)
+
+print(ip, n= 170)
+
+tp<- rbind(ip, pp)
+
+openxlsx::write.xlsx(tp, file= "analysis/CoR_MQ_ag.xlsx")
+```
+
+
+
+
+# **7. Variable Importance score **
+
+
+## *. Variable Importance score for yield*
+
+```{r, eval=FALSE}
+
+#21 and 4
+#22 and 6
+#23 and 5
+#24 and 7
+#25 and 10
+
+load(file.path(base_path, "data/data_sp.Rdata"))
+traits <- names(data_sp)[c(5:13)]
+data_sp_long <- tidyr::pivot_longer(data_sp, all_of(traits), names_to="trait", values_to="value")
+
+#data_sp_long <- data_sp_long[,-5:-11]
+
+#extracting raw spec for MT GP
+##############
+d21<- data_sp_long %>% filter(Env == "KET21") %>% filter(Timepoint  == "4")
+
+d22<- data_sp_long %>% filter(Env == "SNY22") %>% filter(Timepoint  == "6")
+
+d23<- data_sp_long %>% filter(Env == "MCG23") %>% filter(Timepoint == "5" )
+
+d24<- data_sp_long %>% filter(Env == "HELF24") %>% filter(Timepoint =="7")
+
+d25<- data_sp_long %>% filter(Env ==  "MCG25" ) %>% filter(Timepoint =="12")
+
+
+MT_data<- rbind(d21, d22, d23, d24, d25)
+
+table(MT_data$Env, MT_data$Timepoint)
+
+
+
+################################################################################################ 
+
+# extract MT from BLUP
+load("data/spec_BLUE_spatial.RData")
+
+d21<- preds %>% filter(Env == "KET21") %>% filter(Timepoint == "4" )
+
+d22<- preds %>% filter(Env == "SNY22") %>% filter(Timepoint == "6" )
+
+d23<- preds %>% filter(Env == "MCG23") %>% filter(Timepoint == "5" )
+
+d24<- preds %>% filter(Env == "HELF24") %>% filter(Timepoint =="7")
+
+d25<- preds %>% filter(Env ==  "MCG25" ) %>% filter(Timepoint =="12")
+
+colnames(d21)[5]<- "value"
+colnames(d22)[5]<- "value"
+colnames(d23)[5]<- "value"
+colnames(d24)[5]<- "value"
+colnames(d25)[5]<- "value"
+
+MT_data_preds<- rbind(d21,d22, d23, d24, d25)
+####################################
+
+str(MT_data)
+str(data_ag)
+MT_ag_raw <- left_join(MT_data, data_ag[,c(1,3, 5,6)], by= c( "Env", "plot_id"))
+table(MT_ag_raw$Env, MT_ag_raw$Timepoint)
+
+save(MT_ag_raw, file= "data/MT_ag_raw.Rdata")
+
+###################################
+# joining the selected timepoint for GP with BLues for yield and VIs.
+load("data/ag_BLUE_spatial.RData")
+
+tr<- c("HD_JD", "yield_kgha")
+preds<- preds[,-5] %>% filter(VI %in% tr )
+ag_pred <- preds %>%  pivot_wider(names_from = VI, values_from = Predicted)
+MT_ag_preds <- left_join(MT_data_preds, ag_pred, by= c("GID", "Env"))
+save(MT_ag_preds, file= "data/MT_ag_preds.Rdata")
+
+###################################
+# joining the selected timepoint for GP for raw  MQ and VIs.
+MT_mq_raw <- left_join(MT_data, data_mq, by= c("plot_id")) %>% na.omit
+save(MT_mq_raw, file= "data/MT_mq_raw.Rdata")
+```
+

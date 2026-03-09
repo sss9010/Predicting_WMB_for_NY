@@ -1,0 +1,207 @@
+---
+title: "E1. QC and PLOTID merge of spectral and agronomic data "
+author: "sss322"
+date: "2024-12_06"
+output: html_document
+---
+
+
+# Introduction
+
+This document provides an overview of the initial steps in processing and performing quality control (QC) on multi-spectral drone imagery data. The goal is to compute vegetation indices and assess summary statistics.
+
+```{r setup, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+
+## 1.Loading necessary packages and setting working directory
+```{r}
+library(readr)
+library(stringr)
+library(readr)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(ASRtriala)
+library(tidyr)
+```
+
+
+
+## 2. Importing the spectral values from QGIS output
+importing files, binding them together, and calling the columns numeric
+```{r}
+zsy1 <- read_delim("data/Flights/final_zonal_statistics_y1.csv", col_types = cols(timepoint = col_character()), 
+    trim_ws = TRUE, delim = ";")
+
+zsy2 <- read_delim("data/Flights/final_zonal_statistics_y2.csv", col_types = cols(timepoint = col_character()), 
+    trim_ws = TRUE)
+zsy3 <- read_delim("data/Flights/final_zonal_statistics_y3.csv",  col_types = cols(timepoint = col_character()), 
+    trim_ws = TRUE)
+
+zsy4 <- read_delim("data/Flights/final_zonal_statistics_y4.csv",  col_types = cols(timepoint = col_character()), 
+    trim_ws = TRUE)
+
+zsy5 <- read_delim("data/Flights/final_zonal_statistics_y5.csv", col_types = cols(timepoint = col_character()), 
+    trim_ws = TRUE)
+
+wmb_spec<- rbind(zsy1, zsy2, zsy3, zsy4, zsy5)
+```
+
+
+## 3. Adding the columns and adjusting the names of the temporal plots
+```{r}
+wmb_spec<- wmb_spec %>%
+  separate(timepoint, into = c("Env", "Timepoint"), sep = "\\.")
+
+remove(zsy1, zsy2, zsy3, zsy4, zsy5)
+wmb_spec$Env <- as.numeric(wmb_spec$Env)
+wmb_spec$Env <-wmb_spec$Env + 2020 
+wmb_spec$Year<- wmb_spec$Env
+table(wmb_spec$Env)
+wmb_spec <- wmb_spec %>%
+  mutate(Env = case_when(
+    Env < 2022 ~ "21KET",
+    Env > 2021 & Env < 2023 ~ "22SNY",
+    Env > 2022 & Env < 2024 ~ "23MCG",
+    Env > 2023 & Env < 2025 ~ "24HELF",
+    Env > 2024 ~ "25MCG",
+    TRUE ~ NA_character_
+  ))
+
+#creating a new column for the long IDplot and adding +1 to match numbers
+wmb_spec$plot_id <- wmb_spec$plot_id+1
+```
+
+
+
+## 4. Adding the flight dates to the info
+```{r}
+flightdate <- readxl::read_excel("data/Flights/flightdate.xlsx")
+wmb_spec$Timepoint <- as.numeric(wmb_spec$Timepoint)
+wmb_spec <- merge(wmb_spec, flightdate[,-1], by = c("Env", "Timepoint"))
+colnames(wmb_spec)[3]<- "QGID"
+```
+
+
+
+## 5. Adding the PLOTID names to the QGIS spectral data
+```{r}
+WMB_ID_plot <- readxl::read_excel("data/Flights/WMB_ID_plot_map.xlsx")
+
+WMB_ID_plot <- WMB_ID_plot %>%
+  mutate(year = substr(Env, 1, 2),
+    location = substr(Env, 3, nchar(Env)))
+
+wmb_spec <- merge(wmb_spec, WMB_ID_plot, by = c("Env", "QGID"))
+wmb_spec<- wmb_spec[c(-2)]
+remove(flightdate, WMB_ID_plot)
+
+wmb_spec$PLOT <- paste(as.character(wmb_spec$Year), wmb_spec$PLOTID, sep = "")
+```
+
+
+
+
+## 6. Checking for missing values 
+```{r}
+table(is.na(wmb_spec$red_edge), wmb_spec$year)
+table(is.na(wmb_spec$red), wmb_spec$year)
+table(is.na(wmb_spec$green), wmb_spec$year)
+table(is.na(wmb_spec$blue), wmb_spec$year)
+table(is.na(wmb_spec$nir), wmb_spec$year)
+```
+
+
+## 7. Adding the GID, spatial and agronomic data
+```{r}
+WMBpheno <- read_excel("data/pheno/master/WMBpheno.xlsx")
+
+colnames(WMBpheno)[12]<- "plot_id"
+colnames(wmb_spec)[18] <- "plot_id"
+table(wmb_spec$plot_id %in% WMBpheno$plot_id)   # spectral plots have ag trait record
+
+#joining together the GID, agronomics and spectral data
+wmb_spec <- merge(wmb_spec[,c(-1,-8, -11, -12, -13, -14, -15, -16, -17)], WMBpheno, by="plot_id")
+#Checking that the names match 
+table(!WMBpheno$plot_id %in% wmb_spec$plot_id)
+table(!wmb_spec$plot_id %in% WMBpheno$plot_id)
+
+multi<- wmb_spec[, c(-11:-13, -19, -20, -24, -25, -27:-39)]
+
+multi$red<- as.numeric(multi$red)
+multi$nir<- as.numeric(multi$nir)
+multi$blue<- as.numeric(multi$green)
+multi$green<- as.numeric(multi$blue)
+multi$red_edge<- as.numeric(multi$red_edge)
+```
+
+
+## 8. Generating the VI-s
+```{r}
+multi$NDVI<- (multi$nir - multi$red) / (multi$red + multi$nir)
+multi$NDRE<- (multi$nir - multi$red_edge) / (multi$red_edge + multi$nir)
+multi$EVI <- 2.5 * (multi$nir - multi$red) / (multi$nir + 6 * multi$red - 7.5 * multi$blue + 1)
+multi$GDVI <- multi$nir - multi$green
+multi$GNDVI <- (multi$nir - multi$green) / (multi$nir + multi$green)
+multi$NRI <- multi$red / (multi$nir + multi$red_edge + multi$red)
+multi$SAVI <- 1.5 * ((multi$nir - multi$red) / (multi$nir + multi$red + 0.5))
+multi$ENDVI <- (multi$nir + multi$green - 2 * multi$blue) / (multi$nir + multi$green + 2 * multi$blue)
+multi$GIPVI <- multi$nir / (multi$nir + multi$green)
+multi$PSRI <- (multi$red - multi$blue)/ multi$red_edge
+```
+
+
+## 9. Adding the JulianDay as days from sowing
+```{r, echo=FALSE}
+sd21<-  c("2020/10/08", "KET21")
+sd22<-  c("2021/10/11", "SNY22")
+sd23<-  c("2022/10/11", "MCG23")
+sd24<-  c("2023/10/03", "HELF24")
+sd25<-  c("2024/09/27", "MCG25")
+sowingd<- as.data.frame(rbind(sd21, sd22, sd23, sd24, sd25))
+colnames(sowingd)<- c("sowdate", "Env")
+rownames(sowingd)<- NULL
+sowingd$sowdate <- as.Date(sowingd$sowdate)
+# Add sowdate to multi by merging with sowing_dates on Env
+multi <- merge(multi, sowingd, by = "Env")
+multi$sowdate <- as.Date(multi$sowdate)
+multi$Date <- as.Date(multi$Date)
+# Calculate the difference in days between Date and sowdate
+multi$JD <- (multi$Date - multi$sowdate)
+table(multi$Env, multi$JD)#, multi$year)
+multi$JD<- as.numeric(multi$JD)
+multi$JDf<- as.factor(multi$JD)
+```
+
+
+## 10. Basic analysis of CV and GID overlap
+```{r}
+multi$Row <- as.factor(multi$Row)
+multi$Column <- as.factor(multi$Column)
+multi$Env<- as.factor(multi$Env)
+multi$GID<- as.factor(multi$GID)
+sumst <- audit.met(multi, gen= "GID",resp= "yield_kgha", trial= "Env")
+#multi<- multi %>% filter(!JD == "35")
+print(sumst)
+multi$GID = toupper(multi$GID)
+```
+
+
+
+## 11. Saving the output, to become an input for the next spatial correlation BLUP scrips
+```{r}
+save(multi,  file= "data/wmb_multi_alldata.Rdata")
+table(multi$Env, multi$Timepoint)
+```
+
+```{r}
+mm<- multi %>% filter(Env == "MCG25")
+ggplot(mm, aes(x=NDVI)) + 
+  geom_histogram()+
+  facet_wrap(~Timepoint)
+```
+

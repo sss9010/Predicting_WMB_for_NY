@@ -1,0 +1,1670 @@
+---
+title: "Untitled"
+author: "sss322"
+date: "2026-02-17"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning=FALSE, results = "hide")
+```
+
+
+## **Introduction**
+This document provides cotains the heritability calculation for multi-spectral drone imagery vegetative indices, maltinq quality and agronomic traits. The goal is to assess the heritability of all traits and choose the ones to proceed with.
+
+
+## **0. Import packages and data**
+```{r, message=FALSE}
+pkgs <- c("MASS","dplyr","tidyr","asreml","ASRtriala","ASRgenomics",
+          "ggplot2","openxlsx","workflowr","readxl", "forcats", "scales", "corrplot")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+Sys.setenv(LANG = "en")
+Sys.setlocale("LC_TIME", "C")
+```
+
+```{r}
+paths <- c("C:/Users/Siim Sepp/NY_WMB/data",
+           "~/Documents/GitHub/NY_WMB/data",
+           "data")
+
+files <- c("data_ag.Rdata","data_mq.Rdata","data_sp.Rdata","VImat.Rdata", "F_PCA_scores.Rdata")
+
+load_first <- function(fname, dirs = paths) {
+  for (d in dirs) {
+    p <- file.path(path.expand(d), fname)
+    if (file.exists(p)) { load(p, envir = .GlobalEnv); return(invisible(p)) }
+  }
+  stop("File not found in any known location: ", fname)
+}
+invisible(lapply(files, load_first))
+```
+
+
+```{r}
+data_pc<- FPCA_scores_df %>% filter(VI %in% c("NDVI","PSRI"))
+
+data_pc<- data_pc %>% pivot_wider(values_from = colnames(data_pc)[1:3], names_from = "VI")
+
+data_pcmq <- data_mq[,c(-3)] %>% left_join(data_pc, by= "plot_id")
+
+data_pcag <- data_ag[,c(-3,-5, -6)] %>% left_join(data_pc, by= "plot_id")
+```
+
+
+
+
+## **2. Calculating genetic correlation.** 
+
+
+
+### **Genetic correlation for malting quality traits**
+
+
+```{r}
+# ROBUST CORRELATION FUNCTION
+calculate_pc_trait_correlation_robust <- function(data, pc_trait, target_trait, 
+                                                  env = NULL, analysis_type = "Overall") {
+  
+  failure_reason <- NULL
+  
+  # Filter data
+  data_subset <- data
+  if (!is.null(env)) {
+    data_subset <- data_subset %>% filter(Env == env)
+  }
+  
+  data_subset <- data_subset %>%
+    filter(!is.na(!!sym(pc_trait)), !is.na(!!sym(target_trait))) %>%
+    droplevels() %>%
+    mutate(
+      GID = factor(GID),
+      Fam = factor(Fam),
+      obs_id = factor(1:n())
+    )
+  
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  n_fam <- length(unique(data_subset$Fam))
+  
+  # More lenient thresholds for Overall
+  min_obs <- ifelse(is.null(env), 12, 10)  # Reduced from 15
+  min_geno <- ifelse(is.null(env), 6, 5)   # Reduced from 8
+  
+  if (n_obs < min_obs || n_geno < min_geno) {
+    failure_reason <- sprintf("Insufficient data: n_obs=%d (need ≥%d), n_geno=%d (need ≥%d)", 
+                             n_obs, min_obs, n_geno, min_geno)
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # Check variance BEFORE scaling
+  var_pc_raw <- var(data_subset[[pc_trait]], na.rm = TRUE)
+  var_target_raw <- var(data_subset[[target_trait]], na.rm = TRUE)
+  
+  if (var_pc_raw < 1e-10 || var_target_raw < 1e-10) {
+    failure_reason <- sprintf("Zero variance before scaling: PC_var=%.2e, Target_var=%.2e", 
+                             var_pc_raw, var_target_raw)
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # Standardize traits
+  data_subset <- data_subset %>%
+    mutate(
+      !!sym(pc_trait) := as.numeric(scale(!!sym(pc_trait))),
+      !!sym(target_trait) := as.numeric(scale(!!sym(target_trait)))
+    )
+  
+  # Reshape to long format
+  data_long <- data_subset %>%
+    pivot_longer(
+      cols = all_of(c(pc_trait, target_trait)), 
+      names_to = "trait", 
+      values_to = "value"
+    ) %>%
+    mutate(
+      trait = factor(trait, levels = c(pc_trait, target_trait)),
+      units = factor(1:n())
+    ) %>%
+    arrange(trait, units)
+  
+# ===========================================================================
+# MODEL FITTING HIERARCHY
+# ===========================================================================
+  
+  mod <- NULL
+  model_attempted <- "None"
+  convergence_history <- c()
+  
+  # MODEL 1: Full model with Family (US covariance)
+  if (n_fam >= 3) {  # Need at least 3 families
+    mod <- tryCatch({
+      model_attempted <- "Model1: us(trait):GID + diag(trait):Fam"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ us(trait):GID + diag(trait):Fam,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200,
+        workspace = 256e6,
+        start.values = TRUE
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 2: US without Family
+  if (is.null(mod) || !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- "Model2: us(trait):GID"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ us(trait):GID,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200,
+        workspace = 256e6
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 3: CORGH (heterogeneous correlation) - often more stable
+  if (is.null(mod) || !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- "Model3: corgh(trait):GID"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ corgh(trait):GID,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200,
+        workspace = 256e6
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 4: CORV (homogeneous correlation) - most constrained
+  if (is.null(mod) || !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- "Model4: corv(trait):GID"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ corv(trait):GID,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200,
+        workspace = 256e6
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 5: Diagonal only (no correlation structure) with IDV residual
+  if (is.null(mod) || !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- "Model5: diag(trait):GID, idv residual"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ diag(trait):GID,
+        residual = ~ idv(units),
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 6: Separate random effects (no covariance structure)
+  if (is.null(mod) || !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- "Model6: GID + trait:GID (separate)"
+      m <- asreml(
+        fixed = value ~ trait,
+        random = ~ GID + trait:GID,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 200
+      )
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else NULL
+    }, error = function(e) NULL)
+  }
+  
+  # MODEL 7: Update previous model if close to convergence
+  if (!is.null(mod) && !mod$converge) {
+    mod <- tryCatch({
+      model_attempted <- paste0(model_attempted, " + update")
+      m <- update(mod, maxit = 100)
+      convergence_history <- c(convergence_history, 
+                              paste0(model_attempted, ": ", m$converge))
+      if (m$converge) m else mod  # Keep even if not converged
+    }, error = function(e) mod)
+  }
+  
+  # Check if model exists and converged
+  if (is.null(mod) || !inherits(mod, "asreml")) {
+    failure_reason <- sprintf("All models failed to fit. History: %s", 
+                             paste(convergence_history, collapse = "; "))
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  if (!mod$converge) {
+    failure_reason <- sprintf("No model converged. Best attempt: %s. History: %s", 
+                             model_attempted, paste(convergence_history, collapse = "; "))
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # ===========================================================================
+  # EXTRACT VARIANCE COMPONENTS
+  # ===========================================================================
+  
+  vc <- summary(mod)$varcomp
+  
+  if (is.null(vc) || nrow(vc) == 0) {
+    failure_reason <- "No variance components extracted"
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # Try different variance component patterns based on model structure
+  gid_rows <- grep("trait.*GID|GID.*trait|corgh|corv", rownames(vc), ignore.case = TRUE)
+  
+  if (length(gid_rows) < 2) {
+    # Try alternative extraction for diagonal models
+    gid_rows <- grep("GID", rownames(vc))
+  }
+  
+  # Extract variance components based on model structure
+  extraction_successful <- FALSE
+  
+  # Try US/CORGH/CORV structure (3 components)
+  if (length(gid_rows) >= 3) {
+    V1 <- vc[gid_rows[1], "component"]
+    Cov12 <- vc[gid_rows[2], "component"]
+    V2 <- vc[gid_rows[3], "component"]
+    extraction_successful <- TRUE
+  } 
+  # Try DIAG structure (2 components - no covariance)
+  else if (length(gid_rows) == 2) {
+    V1 <- vc[gid_rows[1], "component"]
+    V2 <- vc[gid_rows[2], "component"]
+    # Estimate correlation from phenotypic correlation as fallback
+    pheno_cor <- cor(data_subset[[pc_trait]], data_subset[[target_trait]], 
+                     use = "complete.obs")
+    Cov12 <- pheno_cor * sqrt(V1 * V2)
+    extraction_successful <- TRUE
+    model_attempted <- paste0(model_attempted, " (pheno cor fallback)")
+  } 
+  else {
+    failure_reason <- sprintf("Could not extract variance components from %s", 
+                             model_attempted)
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # Safety checks
+  if (is.na(V1) || is.na(V2) || is.na(Cov12)) {
+    failure_reason <- sprintf("NA variance: V1=%s, V2=%s, Cov=%s", V1, V2, Cov12)
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  # Allow negative variances to be set to small positive value
+  if (V1 <= 0) V1 <- 1e-6
+  if (V2 <= 0) V2 <- 1e-6
+  
+  sqrt_product <- sqrt(V1 * V2)
+  
+  if (sqrt_product < 1e-10) {
+    failure_reason <- sprintf("Near-zero variances: V1=%.2e, V2=%.2e", V1, V2)
+    return(list(failed = TRUE, failure_info = create_failure_info(
+      pc_trait, target_trait, analysis_type, env, failure_reason, n_obs, n_geno
+    )))
+  }
+  
+  rg <- Cov12 / sqrt_product
+  
+  # Constrain to valid range
+  if (is.na(rg) || is.infinite(rg)) {
+    rg <- 0
+    model_attempted <- paste0(model_attempted, " (rg set to 0)")
+  }
+  
+  rg <- pmax(-1, pmin(1, rg))
+  
+  # Calculate SE and p-value
+  se_rg <- sqrt((1 - rg^2)^2 / (2 * n_geno))
+  z_score <- rg / se_rg
+  p_value <- 2 * (1 - pnorm(abs(z_score)))
+  sig <- ifelse(p_value < 0.001, "***", 
+                ifelse(p_value < 0.01, "**",
+                       ifelse(p_value < 0.05, "*", "ns")))
+  
+  # Parse PC info
+  pc_method <- ifelse(grepl("FPC", pc_trait), "FPCA", "PCA")
+  pc_index <- ifelse(grepl("NDVI", pc_trait), "NDVI", "PSRI")
+  pc_number <- as.numeric(gsub(".*PC(\\d+).*", "\\1", pc_trait))
+  
+  results <- data.frame(
+    Analysis = analysis_type,
+    PC_trait = pc_trait,
+    PC_Method = pc_method,
+    PC_Index = pc_index,
+    PC_Number = pc_number,
+    Target_trait = target_trait,
+    Env = ifelse(is.null(env), "Pooled", as.character(env)),
+    V1 = round(V1, 6),
+    V2 = round(V2, 6),
+    Cov = round(Cov12, 6),
+    rg = round(rg, 4),
+    se_rg = round(se_rg, 4),
+    p_value = round(p_value, 4),
+    significance = sig,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    n_fam = n_fam,
+    converged = TRUE,
+    model_used = model_attempted,
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(
+    model = mod, 
+    results = results,
+    failed = FALSE,
+    failure_info = NULL
+  ))
+}
+
+# ==============================================================================
+# HELPER FUNCTION: Create failure info dataframe
+# ==============================================================================
+
+create_failure_info <- function(pc_trait, target_trait, analysis_type, env, 
+                                reason, n_obs, n_geno) {
+  data.frame(
+    PC_trait = pc_trait,
+    Target_trait = target_trait,
+    Analysis = analysis_type,
+    Env = ifelse(is.null(env), "Pooled", as.character(env)),
+    reason = reason,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    stringsAsFactors = FALSE
+  )
+}
+
+# ==============================================================================
+# WRAPPER FUNCTION
+# ==============================================================================
+
+run_all_pc_correlations_robust <- function(data, pc_traits, target_traits, 
+                                           trait_type = "Agronomic") {
+  
+  envs <- unique(data$Env[!is.na(data$Env)])
+  pc_traits <- pc_traits[pc_traits %in% colnames(data)]
+  target_traits <- target_traits[target_traits %in% colnames(data)]
+  
+  if (length(pc_traits) == 0 || length(target_traits) == 0) {
+    cat("No matching traits found in data\n")
+    return(list(results = data.frame(), failures = data.frame()))
+  }
+  
+  cat("\n================================================================================\n")
+  cat(sprintf("GENETIC CORRELATIONS (ROBUST): PC vs %s TRAITS\n", trait_type))
+  cat("================================================================================\n")
+  cat("PC traits:", length(pc_traits), "\n")
+  cat("Target traits:", length(target_traits), "\n\n")
+  
+  all_results <- data.frame()
+  all_failures <- data.frame()
+  
+  # OVERALL ANALYSIS
+  cat("=== OVERALL ANALYSIS ===\n\n")
+  
+  overall_success <- 0
+  overall_failed <- 0
+  
+  for (pc in pc_traits) {
+    for (target in target_traits) {
+      
+      result <- calculate_pc_trait_correlation_robust(
+        data, pc, target, env = NULL, analysis_type = "Overall"
+      )
+      
+      if (!result$failed) {
+        all_results <- rbind(all_results, result$results)
+        overall_success <- overall_success + 1
+        cat(sprintf("  ✓ %s ~ %-25s: rg=%6.3f %s [%s]\n", 
+                   pc, substr(target, 1, 25), 
+                   result$results$rg, result$results$significance,
+                   result$results$model_used))
+      } else {
+        all_failures <- rbind(all_failures, result$failure_info)
+        overall_failed <- overall_failed + 1
+        cat(sprintf("  ✗ %s ~ %-25s: %s\n", 
+                   pc, substr(target, 1, 25), 
+                   substr(result$failure_info$reason, 1, 60)))
+      }
+    }
+  }
+  
+  cat(sprintf("\nOverall: %d success, %d failed\n", overall_success, overall_failed))
+  
+  # BY ENVIRONMENT ANALYSIS
+  cat("\n=== BY ENVIRONMENT ANALYSIS ===\n")
+  
+  for (env_name in envs) {
+    
+    env_data <- data %>% filter(Env == env_name)
+    n_obs_env <- nrow(env_data)
+    n_geno_env <- length(unique(env_data$GID))
+    
+    cat(sprintf("\n--- %s (n=%d, geno=%d) ---\n", env_name, n_obs_env, n_geno_env))
+    
+    env_success <- 0
+    env_failed <- 0
+    
+    for (pc in pc_traits) {
+      for (target in target_traits) {
+        
+        result <- calculate_pc_trait_correlation_robust(
+          data, pc, target, env = env_name, analysis_type = "ByEnv"
+        )
+        
+        if (!result$failed) {
+          all_results <- rbind(all_results, result$results)
+          env_success <- env_success + 1
+        } else {
+          all_failures <- rbind(all_failures, result$failure_info)
+          env_failed <- env_failed + 1
+        }
+      }
+    }
+    
+    cat(sprintf("  %s: %d success, %d failed\n", env_name, env_success, env_failed))
+  }
+  
+  cat(sprintf("\n=== FINAL SUMMARY ===\n"))
+  cat(sprintf("Total successful: %d\n", nrow(all_results)))
+  cat(sprintf("Total failed: %d\n", nrow(all_failures)))
+  cat(sprintf("Success rate: %.1f%%\n", 
+              100 * nrow(all_results) / (nrow(all_results) + nrow(all_failures))))
+  
+  return(list(
+    results = all_results,
+    failures = all_failures
+  ))
+}
+```
+
+
+
+
+```{r}
+# ==============================================================================
+# USAGE
+# ==============================================================================
+pc_traits <- c("FPC1_NDVI", "FPC1_PSRI", "FPC2_NDVI", "FPC2_PSRI", "FPC3_NDVI", "FPC3_PSRI")
+mq_traits <- colnames(data_mq)[4:15]
+ag_traits <- c("yield_kgha", "HD_JD", "winter_survival")
+
+# Run with robust function
+output_ag <- run_all_pc_correlations_robust(data_pcag, pc_traits, ag_traits)
+
+output_mq <- run_all_pc_correlations_robust(data_pcmq, pc_traits, mq_traits)
+
+boxplot(output_mq$results$rg~output_mq$results$Target_trait)
+
+output_ag$results$trait_type = "Agronomic"
+output_mq$results$trait_type = "Malt quality"
+
+```
+
+
+
+
+
+#**GENETIC CORRELATIONS: VEGETATION INDICES vs MALT QUALITY TRAITS**
+
+```{r}
+colnames(data_pcmq)
+colnames(data_sp)
+colnames(data_mq)
+colnames(data_ag)
+#data_sp <- data_sp[,c(1:5,13,14)]
+#data_sp <- data_sp %>% pivot_wider(names_from = Timepoint,
+ #   values_from = c(PSRI, NDVI))
+
+#######################################
+data_spag <-data_ag[,c(-2, -3, -4, -10)] %>% left_join(data_sp, by= "plot_id") 
+str(data_spag)
+#######################################
+
+data_spmq <-data_mq[,c(-1, -3, -18)] %>% left_join(data_sp, by= "plot_id") 
+str(data_spmq)
+```
+
+```{r}
+# ==============================================================================
+# GENETIC CORRELATIONS: VI (by Timepoint) vs MALT QUALITY TRAITS
+# Within each environment AND pooled across environments
+# ==============================================================================
+
+
+# ==============================================================================
+# CORE FUNCTION: Calculate single VI-MQ correlation (ROBUST)
+# ==============================================================================
+
+calculate_vi_mq_correlation_robust <- function(data, vi_trait, mq_trait, 
+                                               timepoint = NULL, env = NULL,
+                                               analysis_type = "Overall") {
+  
+  # Filter data
+  data_subset <- data
+  
+  if (!is.null(env)) {
+    data_subset <- data_subset %>% filter(Env == env)
+  }
+  
+  if (!is.null(timepoint)) {
+    data_subset <- data_subset %>% filter(Timepoint == timepoint)
+  }
+  
+  data_subset <- data_subset %>%
+    filter(!is.na(!!sym(vi_trait)), !is.na(!!sym(mq_trait))) %>%
+    droplevels() %>%
+    mutate(
+      GID = factor(GID),
+      Fam = factor(Fam),
+      obs_id = factor(1:n())
+    )
+  
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  
+  # Data sufficiency check
+  if (n_obs < 15 || n_geno < 8) {
+    return(NULL)
+  }
+  
+  # Standardize traits to prevent scale issues
+  data_subset <- data_subset %>%
+    mutate(
+      !!sym(vi_trait) := as.numeric(scale(!!sym(vi_trait))),
+      !!sym(mq_trait) := as.numeric(scale(!!sym(mq_trait)))
+    )
+  
+  # Check for zero variance after scaling
+  if (sd(data_subset[[vi_trait]], na.rm = TRUE) < 1e-10 || 
+      sd(data_subset[[mq_trait]], na.rm = TRUE) < 1e-10) {
+    return(NULL)
+  }
+  
+  # Reshape to long format
+  data_long <- data_subset %>%
+    #select(GID, Fam, obs_id, all_of(c(vi_trait, mq_trait))) %>%
+    pivot_longer(
+      cols = all_of(c(vi_trait, mq_trait)), 
+      names_to = "trait", 
+      values_to = "value"
+    ) %>%
+    mutate(trait = factor(trait, levels = c(vi_trait, mq_trait))) %>%
+    arrange(trait, obs_id) %>%
+    mutate(units = factor(1:n()))
+  
+  # Fit bivariate model with fallback options
+  mod <- tryCatch({
+    asreml(
+      fixed = value ~ trait,
+      random = ~ us(trait):GID + diag(trait):Fam,
+      residual = ~ units,
+      data = data_long,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 100
+    )
+  }, error = function(e) {
+    tryCatch({
+      asreml(
+        fixed = value ~ trait,
+        random = ~ us(trait):GID,
+        residual = ~ units,
+        data = data_long,
+        ai.sing = TRUE,
+        trace = FALSE,
+        maxit = 100
+      )
+    }, error = function(e2) NULL)
+  })
+  
+  if (is.null(mod) || !inherits(mod, "asreml") || !mod$converge) {
+    return(NULL)
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  if (is.null(vc) || nrow(vc) == 0) return(NULL)
+  
+  gid_rows <- grep("trait.*GID|GID.*trait", rownames(vc))
+  if (length(gid_rows) < 3) return(NULL)
+  
+  V1 <- vc[gid_rows[1], "component"]
+  Cov12 <- vc[gid_rows[2], "component"]
+  V2 <- vc[gid_rows[3], "component"]
+  
+  # Safety checks
+  if (is.na(V1) || is.na(V2) || is.na(Cov12) || 
+      V1 <= 1e-8 || V2 <= 1e-8) {
+    return(NULL)
+  }
+  
+  sqrt_product <- sqrt(V1 * V2)
+  if (sqrt_product < 1e-8) return(NULL)
+  
+  rg <- Cov12 / sqrt_product
+  if (is.na(rg) || is.infinite(rg) || abs(rg) > 1.5) return(NULL)
+  
+  rg <- pmax(-1, pmin(1, rg))
+  se_rg <- sqrt((1 - rg^2)^2 / (2 * n_geno))
+  
+  z_score <- rg / se_rg
+  p_value <- 2 * (1 - pnorm(abs(z_score)))
+  sig <- ifelse(p_value < 0.001, "***", 
+                ifelse(p_value < 0.01, "**",
+                       ifelse(p_value < 0.05, "*", "ns")))
+  
+  results <- data.frame(
+    Analysis = analysis_type,
+    VI = vi_trait,
+    MQ_trait = mq_trait,
+    Timepoint = ifelse(is.null(timepoint), "Pooled", as.character(timepoint)),
+    Env = ifelse(is.null(env), "Pooled", as.character(env)),
+    V1 = round(V1, 6),
+    V2 = round(V2, 6),
+    Cov = round(Cov12, 6),
+    rg = round(rg, 4),
+    se_rg = round(se_rg, 4),
+    p_value = round(p_value, 4),
+    significance = sig,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    converged = TRUE,
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(model = mod, results = results))
+}
+
+# ==============================================================================
+# WRAPPER: Run all VI-MQ correlations
+# By timepoint, by environment, and pooled
+# ==============================================================================
+
+run_all_vi_mq_correlations <- function(data, vi_traits, mq_traits) {
+  
+  # Get unique timepoints and environments
+  timepoints <- sort(unique(data$Timepoint[!is.na(data$Timepoint)]))
+  envs <- unique(data$Env[!is.na(data$Env)])
+  
+  # Filter to available traits
+  vi_traits <- vi_traits[vi_traits %in% colnames(data)]
+  mq_traits <- mq_traits[mq_traits %in% colnames(data)]
+  
+  if (length(vi_traits) == 0 || length(mq_traits) == 0) {
+    cat("No matching traits found in data\n")
+    return(data.frame())
+  }
+  
+  cat("\n================================================================================\n")
+  cat("GENETIC CORRELATIONS: VI (by Timepoint) vs MALT QUALITY TRAITS\n")
+  cat("================================================================================\n")
+  cat("VI traits:", paste(vi_traits, collapse = ", "), "\n")
+  cat("MQ traits:", length(mq_traits), "\n")
+  cat("Timepoints:", paste(timepoints, collapse = ", "), "\n")
+  cat("Environments:", paste(envs, collapse = ", "), "\n\n")
+  
+  all_results <- data.frame()
+  
+  # ===========================================================================
+  # ANALYSIS 1: BY TIMEPOINT × ENVIRONMENT (Most granular)
+  # ===========================================================================
+  
+  cat("=== ANALYSIS 1: BY TIMEPOINT × ENVIRONMENT ===\n")
+  
+  for (env_name in envs) {
+    
+    cat(sprintf("\n--- Environment: %s ---\n", env_name))
+    
+    for (tp in timepoints) {
+      
+      # Check data availability
+      tp_env_data <- data %>% 
+        filter(Env == env_name, Timepoint == tp)
+      
+      n_obs <- nrow(tp_env_data)
+      n_geno <- length(unique(tp_env_data$GID))
+      
+      if (n_obs < 15 || n_geno < 8) {
+        cat(sprintf("  Timepoint %s: Insufficient data (n=%d, geno=%d)\n", 
+                    tp, n_obs, n_geno))
+        next
+      }
+      
+      cat(sprintf("  Timepoint %s (n=%d, geno=%d):\n", tp, n_obs, n_geno))
+      
+      tp_results <- 0
+      
+      for (vi in vi_traits) {
+        for (mq in mq_traits) {
+          
+          result <- calculate_vi_mq_correlation_robust(
+            data, vi, mq, 
+            timepoint = tp, 
+            env = env_name,
+            analysis_type = "Env×Time"
+          )
+          
+          if (!is.null(result)) {
+            all_results <- rbind(all_results, result$results)
+            tp_results <- tp_results + 1
+          }
+        }
+      }
+      
+      cat(sprintf("    Completed: %d correlations\n", tp_results))
+    }
+  }
+  
+  cat(sprintf("\nCompleted Env×Time: %d correlations\n", 
+              nrow(all_results %>% filter(Analysis == "Env×Time"))))
+  
+  # ===========================================================================
+  # ANALYSIS 2: BY TIMEPOINT (POOLED ACROSS ENVIRONMENTS)
+  # ===========================================================================
+  
+  cat("\n\n=== ANALYSIS 2: BY TIMEPOINT (POOLED ACROSS ENVIRONMENTS) ===\n")
+  
+  for (tp in timepoints) {
+    
+    # Check data availability
+    tp_data <- data %>% filter(Timepoint == tp)
+    n_obs <- nrow(tp_data)
+    n_geno <- length(unique(tp_data$GID))
+    
+    if (n_obs < 20 || n_geno < 10) {
+      cat(sprintf("\nTimepoint %s: Insufficient data (n=%d, geno=%d)\n", 
+                  tp, n_obs, n_geno))
+      next
+    }
+    
+    cat(sprintf("\nTimepoint %s (n=%d, geno=%d):\n", tp, n_obs, n_geno))
+    
+    tp_results <- 0
+    
+    for (vi in vi_traits) {
+      for (mq in mq_traits) {
+        
+        result <- calculate_vi_mq_correlation_robust(
+          data, vi, mq, 
+          timepoint = tp, 
+          env = NULL,
+          analysis_type = "ByTimepoint"
+        )
+        
+        if (!is.null(result)) {
+          all_results <- rbind(all_results, result$results)
+          tp_results <- tp_results + 1
+          
+          cat(sprintf("  %s ~ %-25s: rg = %6.3f %s\n", 
+                     vi, substr(mq, 1, 25), 
+                     result$results$rg, result$results$significance))
+        }
+      }
+    }
+    
+    cat(sprintf("  Completed: %d correlations\n", tp_results))
+  }
+  
+  cat(sprintf("\nCompleted ByTimepoint: %d correlations\n", 
+              nrow(all_results %>% filter(Analysis == "ByTimepoint"))))
+  
+  # ===========================================================================
+  # ANALYSIS 3: BY ENVIRONMENT (POOLED ACROSS TIMEPOINTS)
+  # ===========================================================================
+  
+  cat("\n\n=== ANALYSIS 3: BY ENVIRONMENT (POOLED ACROSS TIMEPOINTS) ===\n")
+  
+  for (env_name in envs) {
+    
+    # Check data availability
+    env_data <- data %>% filter(Env == env_name)
+    n_obs <- nrow(env_data)
+    n_geno <- length(unique(env_data$GID))
+    
+    if (n_obs < 20 || n_geno < 10) {
+      cat(sprintf("\n%s: Insufficient data (n=%d, geno=%d)\n", 
+                  env_name, n_obs, n_geno))
+      next
+    }
+    
+    cat(sprintf("\n%s (n=%d, geno=%d):\n", env_name, n_obs, n_geno))
+    
+    env_results <- 0
+    
+    for (vi in vi_traits) {
+      for (mq in mq_traits) {
+        
+        result <- calculate_vi_mq_correlation_robust(
+          data, vi, mq, 
+          timepoint = NULL, 
+          env = env_name,
+          analysis_type = "ByEnv"
+        )
+        
+        if (!is.null(result)) {
+          all_results <- rbind(all_results, result$results)
+          env_results <- env_results + 1
+        }
+      }
+    }
+    
+    cat(sprintf("  Completed: %d correlations\n", env_results))
+  }
+  
+  cat(sprintf("\nCompleted ByEnv: %d correlations\n", 
+              nrow(all_results %>% filter(Analysis == "ByEnv"))))
+  
+  # ===========================================================================
+  # ANALYSIS 4: OVERALL (POOLED ACROSS EVERYTHING)
+  # ===========================================================================
+  
+  cat("\n\n=== ANALYSIS 4: OVERALL (POOLED ACROSS ALL TIMEPOINTS & ENVIRONMENTS) ===\n")
+  
+  n_total <- nrow(data)
+  n_geno_total <- length(unique(data$GID))
+  cat(sprintf("Total data: %d obs, %d genotypes\n\n", n_total, n_geno_total))
+  
+  for (vi in vi_traits) {
+    for (mq in mq_traits) {
+      
+      result <- calculate_vi_mq_correlation_robust(
+        data, vi, mq, 
+        timepoint = NULL, 
+        env = NULL,
+        analysis_type = "Overall"
+      )
+      
+      if (!is.null(result)) {
+        all_results <- rbind(all_results, result$results)
+        cat(sprintf("  %s ~ %-25s: rg = %6.3f %s\n", 
+                   vi, substr(mq, 1, 25), 
+                   result$results$rg, result$results$significance))
+      }
+    }
+  }
+  
+  cat(sprintf("\nCompleted Overall: %d correlations\n", 
+              nrow(all_results %>% filter(Analysis == "Overall"))))
+  
+  return(all_results)
+}
+
+# ==============================================================================
+# EXECUTE ANALYSIS
+# ==============================================================================
+
+cat("\n\n################################################################################\n")
+cat("STARTING: VI-TIMEPOINT vs MALT QUALITY TRAITS ANALYSIS\n")
+cat("################################################################################\n")
+
+# Define VI traits
+vi_traits <- c("NDVI", "PSRI")
+
+# Define malt quality traits
+mq_traits <- colnames(data_mq)[4:15]
+
+colnames(data_mq)
+colnames(data_sp)
+data_merged<- data_sp[,c(1:5,13, 14)] %>% left_join(data_mq[,c(-1,-3, -18)], by= "plot_id")
+colnames(data_merged)
+data_merged<- data_merged %>% filter(Env %in% data_mq$Env)
+
+table(data_merged$Env, data_merged$Timepoint)
+
+# Run comprehensive analysis
+results_vi_mq <- run_all_vi_mq_correlations(
+  data = data_merged,
+  vi_traits = vi_traits,
+  mq_traits = mq_traits
+)
+
+table(results_vi_mq$converged)
+
+
+cat("\n\n################################################################################\n")
+cat("STARTING: VI-TIMEPOINT vs AGRONOMIC TRAITS ANALYSIS\n")
+cat("################################################################################\n")
+
+# Define VI traits
+vi_traits <- c("NDVI", "PSRI")
+
+# Define malt quality traits
+ag_traits <- colnames(data_ag)[7:9]
+
+colnames(data_ag)
+colnames(data_sp)
+data_merged<- data_sp[,c(1:5,13, 14)] %>% left_join(data_ag[,c(-2,-3, -4, -10)], by= "plot_id")
+colnames(data_merged)
+data_merged<- data_merged
+
+table(data_merged$Env, data_merged$Timepoint)
+
+# Run comprehensive analysis
+results_vi_ag <- run_all_vi_mq_correlations(
+  data = data_merged,
+  vi_traits = vi_traits,
+  mq_traits = ag_traits
+)
+
+
+results_vi_mq<- rbind(results_vi_mq, results_vi_ag)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ==============================================================================
+# SUMMARY STATISTICS
+# ==============================================================================
+
+cat("\n\n################################################################################\n")
+cat("SUMMARY STATISTICS\n")
+cat("################################################################################\n\n")
+
+if (nrow(results_vi_mq) > 0) {
+  
+  # Overall summary by analysis type
+  summary_analysis <- results_vi_mq %>%
+    group_by(Analysis) %>%
+    summarise(
+      n_correlations = n(),
+      n_significant = sum(p_value < 0.05),
+      pct_significant = round(100 * n_significant / n_correlations, 1),
+      mean_abs_rg = round(mean(abs(rg)), 3),
+      median_rg = round(median(rg), 3),
+      .groups = 'drop'
+    )
+  
+  cat("===== SUMMARY BY ANALYSIS TYPE =====\n")
+  print(summary_analysis)
+  #write.csv(summary_analysis, "VI_MQ_Summary_Analysis.csv", row.names = FALSE)
+  
+  # Summary by timepoint (pooled across environments)
+  summary_timepoint <- results_vi_mq %>%
+    filter(Analysis == "ByTimepoint") %>%
+    group_by(Timepoint) %>%
+    summarise(
+      n_correlations = n(),
+      n_significant = sum(p_value < 0.05),
+      mean_abs_rg = round(mean(abs(rg)), 3),
+      .groups = 'drop'
+    )
+  
+  cat("\n===== SUMMARY BY TIMEPOINT =====\n")
+  print(summary_timepoint)
+  #write.csv(summary_timepoint, "VI_MQ_Summary_Timepoint.csv", row.names = FALSE)
+  
+  # Summary by environment (pooled across timepoints)
+  if (any(results_vi_mq$Analysis == "ByEnv")) {
+    summary_env <- results_vi_mq %>%
+      filter(Analysis == "ByEnv") %>%
+      group_by(Env) %>%
+      summarise(
+        n_correlations = n(),
+        n_significant = sum(p_value < 0.05),
+        mean_abs_rg = round(mean(abs(rg)), 3),
+        .groups = 'drop'
+      )
+    
+    cat("\n===== SUMMARY BY ENVIRONMENT =====\n")
+    print(summary_env)
+    #write.csv(summary_env, "VI_MQ_Summary_Environment.csv", row.names = FALSE)
+  }
+  
+  # Best timepoint for each VI-MQ pair
+  best_timepoint <- results_vi_mq %>%
+    filter(Analysis == "ByTimepoint", p_value < 0.05) %>%
+    group_by(VI, MQ_trait) %>%
+    slice_max(abs(rg), n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    arrange(VI, desc(abs(rg)))
+  
+  if (nrow(best_timepoint) > 0) {
+    cat("\n===== BEST TIMEPOINT FOR EACH VI-MQ COMBINATION =====\n")
+    print(best_timepoint)
+    #write.csv(best_timepoint, "VI_MQ_BestTimepoints.csv", row.names = FALSE)
+  }
+  
+  # Top 20 overall correlations
+  top_overall <- results_vi_mq %>%
+    filter(Analysis == "Overall", p_value < 0.05) %>%
+    arrange(desc(abs(rg))) %>%
+    head(20)
+  
+  if (nrow(top_overall) > 0) {
+    cat("\n===== TOP 20 CORRELATIONS (OVERALL) =====\n")
+    print(top_overall %>% select(VI, MQ_trait, rg, significance))
+   # write.csv(top_overall, "VI_MQ_Top20_Overall.csv", row.names = FALSE)
+  }
+  
+  # Top correlations from Env×Time analysis
+  top_envtime <- results_vi_mq %>%
+    filter(Analysis == "Env×Time", p_value < 0.05) %>%
+    arrange(desc(abs(rg))) %>%
+    head(20)
+  
+  if (nrow(top_envtime) > 0) {
+    cat("\n===== TOP 20 CORRELATIONS (ENV×TIMEPOINT) =====\n")
+    print(top_envtime %>% select(Env, Timepoint, VI, MQ_trait, rg, significance))
+    #write.csv(top_envtime, "VI_MQ_Top20_EnvTime.csv", row.names = FALSE)
+  }
+}
+
+# ==============================================================================
+# VISUALIZATIONS
+# ==============================================================================
+
+if (nrow(results_vi_mq) > 0) {
+  
+  # Plot 1: Heatmap - Timepoint × VI vs MQ (key traits)
+  if (any(results_vi_mq$Analysis == "ByTimepoint")) {
+    
+    key_mq <- unique(results_vi_mq$MQ_trait)
+    
+    plot_data <- results_vi_mq %>%
+      filter(Analysis == "ByTimepoint", MQ_trait %in% key_mq) %>%
+      mutate(
+        VI_Time = paste0(VI, "_T", Timepoint),
+        MQ_short = gsub("\\.+$", "", gsub("\\.\\.\\.", "", MQ_trait)),
+        rg_label = ifelse(p_value < 0.05, sprintf("%.2f", rg), "")
+      )
+    
+    if (nrow(plot_data) > 0) {
+      p1 <- ggplot(plot_data, aes(y = MQ_short, x = VI_Time, fill = rg)) +
+        geom_tile(color = "white", linewidth = 1) +
+        geom_text(aes(label = rg_label), size = 3) +
+        scale_fill_gradient2(
+          low = "blue", mid = "white", high = "red",
+          midpoint = 0, limits = c(-1, 1),
+          name = "rg"
+        ) +
+        #theme_minimal(base_size = 11) +
+        labs(
+          title = "Genetic Correlations by Timepoint (Pooled Environments)",
+          subtitle = "VI × Timepoint vs Key Malt Quality Traits",
+          x = "Malt Quality Trait",
+          y = "VI × Timepoint"
+        ) +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid = element_blank()
+        )
+      
+      #ggsave("VI_MQ_Heatmap_ByTimepoint.png", p1, width = 10, height = 8, dpi = 300)
+      print(p1)
+    }
+  }
+  
+  # Plot 2: Temporal trends for key MQ traits
+  if (any(results_vi_mq$Analysis == "ByTimepoint")) {
+    
+    #key_mq <- c("MaltExtract...", "BarleyProtein...", "All_MaltQualityScore")
+    
+    for (mq in key_mq) {
+      
+      plot_data <- results_vi_mq %>%
+        filter(Analysis == "ByTimepoint", MQ_trait == mq) %>%
+        mutate(Timepoint = as.numeric(Timepoint))
+      
+      if (nrow(plot_data) > 0) {
+        p <- ggplot(plot_data, aes(x = Timepoint, y = rg, color = VI,
+                                    shape = ifelse(p_value < 0.05, "Sig", "NS"))) +
+          geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+          geom_line(aes(group = VI), linewidth = 1) +
+          geom_point(size = 4) +
+          geom_errorbar(aes(ymin = rg - se_rg, ymax = rg + se_rg), width = 0.2) +
+          scale_shape_manual(values = c("Sig" = 16, "NS" = 1), name = "p < 0.05") +
+          scale_color_manual(values = c("NDVI" = "darkgreen", "PSRI" = "purple")) +
+          theme_bw(base_size = 12) +
+          labs(
+            title = paste("Genetic Correlation with", mq),
+            subtitle = "Across growth stages (pooled environments)",
+            x = "Timepoint",
+            y = "Genetic Correlation (rg)",
+            color = "Vegetation Index"
+          ) +
+          ylim(-1, 1)
+        
+        print(p)
+      }
+    }
+  }
+  
+  # Plot 3: Environment comparison for top correlation
+  if (any(results_vi_mq$Analysis %in% c("ByEnv", "Env×Time"))) {
+    
+    top_pair <- results_vi_mq %>%
+      filter(Analysis == "Overall", p_value < 0.05) %>%
+      arrange(desc(abs(rg))) %>%
+      slice(1)
+    
+    if (nrow(top_pair) > 0) {
+      
+      env_data <- results_vi_mq %>%
+        filter(Analysis == "ByEnv",
+               VI == top_pair$VI[1],
+               MQ_trait == top_pair$MQ_trait[1])
+      
+      if (nrow(env_data) > 1) {
+        p3 <- ggplot(env_data, aes(x = Env, y = rg)) +
+          geom_hline(yintercept = 0, linetype = "dashed") +
+          geom_point(size = 4, color = "steelblue") +
+          geom_errorbar(aes(ymin = rg - se_rg, ymax = rg + se_rg), width = 0.2) +
+          theme_bw(base_size = 12) +
+          labs(
+            title = "Genetic Correlation Across Environments",
+            subtitle = paste(top_pair$VI[1], "vs", top_pair$MQ_trait[1]),
+            x = "Environment",
+            y = "Genetic Correlation (rg)"
+          ) +
+          ylim(-1, 1)
+
+        print(p3)
+      }
+    }
+  }
+  
+  # Plot 4: Heatmap - Env × Timepoint for specific VI-MQ pair
+  if (any(results_vi_mq$Analysis == "Env×Time")) {
+    
+    # Find most significant correlation overall
+    top_pair <- results_vi_mq %>%
+      filter(Analysis == "Overall", p_value < 0.05) %>%
+      arrange(desc(abs(rg))) %>%
+      slice(1)
+    
+    if (nrow(top_pair) > 0) {
+      
+      envtime_data <- results_vi_mq %>%
+        filter(Analysis == "Env×Time",
+               VI == top_pair$VI[1],
+               MQ_trait == top_pair$MQ_trait[1]) %>%
+        mutate(
+          Timepoint = factor(Timepoint),
+          rg_label = ifelse(p_value < 0.05, sprintf("%.2f", rg), "")
+        )
+      
+      if (nrow(envtime_data) > 0) {
+        p4 <- ggplot(envtime_data, aes(x = Timepoint, y = Env, fill = rg)) +
+          geom_tile(color = "white", linewidth = 1) +
+          geom_text(aes(label = rg_label), size = 3.5) +
+          scale_fill_gradient2(
+            low = "blue", mid = "white", high = "red",
+            midpoint = 0, limits = c(-1, 1),
+            name = "rg"
+          ) +
+         #theme_minimal(base_size = 12) +
+          labs(
+            title = paste(top_pair$VI[1], "vs", top_pair$MQ_trait[1]),
+            subtitle = "Genetic correlations by Environment × Timepoint",
+            x = "Timepoint",
+            y = "Environment"
+          ) +
+          theme(panel.grid = element_blank())
+        print(p4)
+      }
+    }
+  }
+  
+  # Plot 5: Which timepoint is best?
+  if (nrow(best_timepoint) > 0) {
+    
+    timepoint_counts <- best_timepoint %>%
+      count(Timepoint, VI, name = "n_traits")
+    
+    p5 <- ggplot(timepoint_counts, aes(x = factor(Timepoint), y = n_traits, fill = VI)) +
+      geom_bar(stat = "identity", position = "dodge", color = "black") +
+      scale_fill_manual(values = c("NDVI" = "darkgreen", "PSRI" = "purple")) +
+      theme_bw(base_size = 12) +
+      labs(
+        title = "Which Timepoint Best Predicts Malt Quality?",
+        subtitle = "Count of MQ traits with strongest correlation at each timepoint",
+        x = "Timepoint",
+        y = "Number of MQ Traits",
+        fill = "Vegetation Index"
+      )
+    print(p5)
+  }
+  
+  # Plot 6: Overall comparison bar chart
+  overall_data <- results_vi_mq %>%
+    filter(Analysis == "Overall") %>%
+    mutate(MQ_short = gsub("\\.+$", "", gsub("\\.\\.\\.", "", MQ_trait)))
+  
+  if (nrow(overall_data) > 0) {
+    p6 <- ggplot(overall_data, aes(x = reorder(MQ_short, abs(rg)), y = rg, fill = VI)) +
+      geom_bar(stat = "identity", position = "dodge", color = "black") +
+      geom_text(aes(label = significance), 
+                position = position_dodge(width = 0.9), 
+                hjust = -0.2, size = 3) +
+      coord_flip() +
+      scale_fill_manual(values = c("NDVI" = "darkgreen", "PSRI" = "purple")) +
+      theme_bw(base_size = 11) +
+      labs(
+        title = "Overall Genetic Correlations: VI vs Malt Quality",
+        subtitle = "Pooled across all timepoints and environments",
+        x = "Malt Quality Trait",
+        y = "Genetic Correlation (rg)",
+        fill = "VI"
+      ) +
+      ylim(-1, 1)
+    print(p6)
+  }
+}
+```
+
+
+
+
+
+```{r}
+
+results_pc<- rbind(results_pc_ag,results_pc_mq)
+
+hist(results_vi$rg)
+hist(results_pc$rg)
+g_cor_res<- list(results_vi, results_pc)
+
+save(g_cor_res, file= "gen_cor.Rdata")
+```
+
+
+
+
+##**Correlation plots for VI agronomic**
+```{r}
+colnames(results_vi_ag)
+table(corr_summary$Analysis)
+corr_summary<- results_vi_ag %>% filter(Analysis == "Env×Time")
+
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+trait_map <- c(
+  "KernelWeight.mg." = "KW",
+  "on6.64...."       = "on6/64",
+  "winter_survival"  = "WS",
+  "MaltExtract..."   = "ME",
+  "BarleyProtein..." = "BP",
+  "WortProtein..."   = "WP",
+  "S.T"              = "S.T", 
+  "DP..ASBC."       = "DP", 
+  "Alpha.amylase.20.DU." = "AA", 
+  "Beta.glucan.ppm." = "BG",
+  "HD_JD" = "HD", 
+  "yield_kgha" = "GY", 
+  "FAN.ppm."         = "FAN", 
+  "AdjunctQualityScore" = "Adj.Sc",
+  "All_MaltQualityScore" = "All.Sc")
+
+
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+
+trait_order<- c( "GY" , "HD", "WS",  "KW", "on6/64" , "FAN" , "DP", "AA", "S.T" , "BG" , "ME",  "BP", "WP", "Adj.Sc", "All.Sc" )
+
+corr_summary <- corr_summary %>%
+  mutate(MQ_trait = recode(MQ_trait, !!!trait_map))
+
+corr_summary <- corr_summary %>%  mutate( Env= trimws(as.character(Env)),
+    Env = fct_relevel(Env, env_order)  
+  ) %>% mutate( MQ_trait= trimws(as.character(MQ_trait)),
+    MQ_trait = fct_relevel(MQ_trait, trait_order)  
+  )
+
+
+# ==============================================================================
+# HEATMAP VISUALIZATIONS FOR GENETIC CORRELATIONS AGRONOMIC
+# ==============================================================================
+
+corr_summary$Timepoint<- as.numeric(corr_summary$Timepoint)
+corr_summary$Timepoint[1:42] <- corr_summary$Timepoint[1:42] - 1
+corr_summary$Timepoint[79:99] <- corr_summary$Timepoint[79:99]-1
+corr_summary$Timepoint[100:145] <- corr_summary$Timepoint[100:145] -11
+corr_summary$Timepoint[146:157] <- corr_summary$Timepoint[146:157] -1
+
+JD_map_filtered$Timepoint <- as.numeric(JD_map_filtered$Timepoint) 
+JD_map_filtered$Env <- JD_map_filtered$Environment
+corr_summary1<- corr_summary %>% left_join(JD_map_filtered[,c(2,3,4,5)], by = c("Env", "Timepoint"))
+
+# ==============================================================================
+# OPTION 1: HEATMAP - VI × MQ_trait, FACETED BY ENV
+# Timepoint on x-axis, separate panel per environment
+# ==============================================================================
+
+heatmap_by_env <- ggplot(
+  corr_summary,
+  aes(x = factor(Timepoint), y = MQ_trait, fill = rg)
+) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.2f%s", rg, significance)), 
+              size = 3, color = "black", angle= -90)+
+  facet_grid(VI ~ Env, scales = "free") +  # VI in rows, Env in columns
+  scale_fill_gradient2(
+    low = "lightblue3",
+    mid = "white",
+    high = "red3",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Genetic\nCorrelation"
+  ) +
+  labs(
+    x = "Timepoint",
+    y = "Trait"
+  ) +
+  #theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 14),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+print(heatmap_by_env)
+```
+
+
+
+##**Correlation plots for VI mqlt quality. *
+```{r}
+results_vi_mq 
+
+corr_summary<- results_vi_mq %>% filter(Analysis == "Env×Time")
+table(corr_summary$Analysis)
+
+corr_summary <- corr_summary %>%
+  mutate(MQ_trait = recode(MQ_trait, !!!trait_map))
+
+corr_summary <- corr_summary %>%  mutate( Env= trimws(as.character(Env)),
+    Env = fct_relevel(Env, env_order)  
+  ) %>% mutate( MQ_trait= trimws(as.character(MQ_trait)),
+    MQ_trait = fct_relevel(MQ_trait, trait_order)  
+  )
+
+
+# ==============================================================================
+# HEATMAP VISUALIZATIONS FOR GENETIC CORRELATIONS AGRONOMIC
+# ==============================================================================
+
+corr_summary$Timepoint<- as.numeric(corr_summary$Timepoint)
+corr_summary$Timepoint[1:231] <- corr_summary$Timepoint[1:231] - 1
+corr_summary$Timepoint[232:390] <- corr_summary$Timepoint[232:390]-11
+
+
+JD_map_filtered$Timepoint <- as.numeric(JD_map_filtered$Timepoint) 
+JD_map_filtered$Env <- JD_map_filtered$Environment
+corr_summary1<- corr_summary %>% left_join(JD_map_filtered[,c(2,3,4,5)], by = c("Env", "Timepoint"))
+
+# ==============================================================================
+# OPTION 1: HEATMAP - VI × MQ_trait, FACETED BY ENV
+# Timepoint on x-axis, separate panel per environment
+# ==============================================================================
+
+heatmap_by_env <- ggplot(
+  corr_summary,
+  aes(x = factor(Timepoint), y = MQ_trait, fill = rg)
+) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  #geom_text(aes(label = sprintf("%.1f%s", rg,"")), 
+  #            size = 3, color = "black")+
+  facet_grid(VI ~ Env, scales = "free") +  # VI in rows, Env in columns
+  scale_fill_gradient2(
+    low = "lightblue3",
+    mid = "white",
+    high = "red3",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Genetic\nCorrelation"
+  ) +
+  labs(
+    x = "Timepoint",
+    y = "Trait"
+  ) +
+  #theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 14),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+print(heatmap_by_env)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+##**Correlation plots for PC agronomic**
+```{r}
+results_pc_ag
+results_pc_mq
+corr_summary<- results_pc_ag %>% filter(Analysis == "ByEnv")
+
+table(corr_summary$Analysis)
+
+corr_summary <- corr_summary %>%
+  mutate(Target_trait = recode(Target_trait, !!!trait_map))
+
+corr_summary <- corr_summary %>%  mutate( Env= trimws(as.character(Env)),
+    Env = fct_relevel(Env, env_order)  
+  ) %>% mutate( Target_trait= trimws(as.character(Target_trait)),
+    Target_trait = fct_relevel(Target_trait, trait_order)  
+  )
+
+
+str(corr_summary)
+
+
+corr_summary <- corr_summary %>%
+  separate(
+    col = PC_trait,
+    into = c("PC_Index", "PC_Type_Num"),
+    sep = "_",
+    remove = FALSE  # Keep original column
+  ) %>%
+  mutate(
+    PC_Method = ifelse(grepl("FPC", PC_Type_Num), "FPCA", "PCA"),
+    PC_Number = as.numeric(str_extract(PC_Type_Num, "\\d+"))
+  ) %>%
+  select(-PC_Type_Num)  # Remove temporary column
+
+# View result
+head(corr_summary)
+
+
+heatmap_by_env <- ggplot(
+  corr_summary,
+  aes(x = factor(PC_Number), y = Target_trait, fill = rg)
+) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.1f%s", rg,significance)), 
+              size = 3, color = "black")+
+  facet_grid(PC_Method ~ PC_Index ~ Env, scales = "free") +  # VI in rows, Env in columns
+  scale_fill_gradient2(
+    low = "lightblue3",
+    mid = "white",
+    high = "red3",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Genetic\nCorrelation"
+  ) +
+  labs(
+    x = "Component",
+    y = "Trait"
+  ) +
+  #theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 14),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+print(heatmap_by_env)
+```
+
+
+
+##**Correlation plots for PC malt**
+```{r}
+corr_summary<- results_pc_mq %>% filter(Analysis == "ByEnv")
+
+table(corr_summary$Analysis)
+
+corr_summary <- corr_summary %>%
+  mutate(Target_trait = recode(Target_trait, !!!trait_map))
+
+corr_summary <- corr_summary %>%  mutate( Env= trimws(as.character(Env)),
+    Env = fct_relevel(Env, env_order)  
+  ) %>% mutate( Target_trait= trimws(as.character(Target_trait)),
+    Target_trait = fct_relevel(Target_trait, trait_order)  
+  )
+
+
+str(corr_summary)
+
+
+corr_summary <- corr_summary %>%
+  separate(
+    col = PC_trait,
+    into = c("PC_Index", "PC_Type_Num"),
+    sep = "_",
+    remove = FALSE  # Keep original column
+  ) %>%
+  mutate(
+    PC_Method = ifelse(grepl("FPC", PC_Type_Num), "FPCA", "PCA"),
+    PC_Number = as.numeric(str_extract(PC_Type_Num, "\\d+"))
+  ) %>%
+  select(-PC_Type_Num)  # Remove temporary column
+
+# View result
+head(corr_summary)
+
+
+heatmap_by_env <- ggplot(
+  corr_summary,
+  aes(x = factor(PC_Number), y = Target_trait, fill = rg)
+) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.1f%s", rg,significance)), 
+              size = 2.5, color = "black")+
+  facet_grid(PC_Method ~ PC_Index ~ Env, scales = "free") +  # VI in rows, Env in columns
+  scale_fill_gradient2(
+    low = "lightblue3",
+    mid = "white",
+    high = "red3",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Genetic\nCorrelation"
+  ) +
+  labs(
+    x = "Component",
+    y = "Trait"
+  ) +
+  #theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 14),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+
+print(heatmap_by_env)
+```

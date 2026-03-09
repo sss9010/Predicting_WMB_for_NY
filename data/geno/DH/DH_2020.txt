@@ -1,0 +1,3 @@
+The PLINK Input Report files have been created in the BeadStudio project directory.
+
+C:\Users\kars8\git\NY-winter-barley-analysis\data\genotypes\DH\PLINK_140822_0908

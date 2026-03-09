@@ -1,0 +1,113 @@
+---
+title: "Master_models"
+author: "sss322"
+date: "2025-03-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+
+
+### **M2: Single Phenomic Kernel (one best VI or integrated VI across time)**
+```{r}
+Mod_M2 <- asreml(
+  fixed    = trait ~ 1,
+  random   = ~ vm(GID, Pinv.sparse),    # Phenomic random effect
+  residual = ~ dsum(~ units),
+  data     = data
+)
+```
+
+
+## 2. Add Multi-Kernel Integration (M4, M5)
+
+### **M4/M5: G + P random effects in the same model**
+```{r}
+Mod_MultiKernel <- asreml(
+  fixed    = trait ~ 1,
+  random   = ~ vm(GID, Ginv.sparse)     # Genomic kernel
+           + vm(GID, Pinv.sparse),      # Phenomic kernel
+  residual = ~ dsum(~ units),
+  data     = data
+)
+```
+
+---
+
+## 3. Move to Multivariate / Multi-Trait (M6 – M9)
+
+
+```{r}
+Mod_MultiTrait <- asreml(
+  fixed  = cbind(trait1, trait2) ~ trait,  # or ~ trait - 1, depending on parameterization
+  random = ~ corgh(trait):vm(GID, Ginv.sparse)
+          + corgh(trait):vm(GID, Pinv.sparse),
+  residual = ~ idv(trait):dsum(~ units),   # or corgh, us, etc., as appropriate
+  data   = data
+)
+```
+
+
+---
+
+## 4. Incorporate Time-Series Phenomics (FPCA or PCA) + Multi-Kernel (M7, M9)
+
+
+1. **Covariates** in the model’s fixed/random part, or  
+2. **Used to construct a new phenomic kernel** (e.g., using the FPCA scores).
+
+
+```{r}
+# Suppose Pinv_fpca.sparse is a relationship matrix derived from the FPCA scores
+Mod_FPCA <- asreml(
+  fixed    = trait ~ 1,
+  random   = ~ vm(GID, Ginv.sparse) 
+           + vm(GID, Pinv_fpca.sparse),
+  residual = ~ dsum(~ units),
+  data     = data
+)
+```
+
+
+## 5. Add Complex Interaction Structures (G×E, P×E) with Factor Analytic (FA)
+
+### **Factor analytic (FA) with G kernel only** 
+
+```{r}
+Mod_FA_G <- asreml(
+  fixed  = trait ~ 1,
+  random = ~ vm(GID, Ginv.sparse):fa(LocYear, 2),  # FA(2) across environments
+  residual = ~ dsum(~ units),
+  data   = data
+)
+```
+with 2 factors for the environment dimension.
+
+### **Factor analytic (FA) with P kernel only**
+```{r}
+Mod_FA_P <- asreml(
+  fixed  = trait ~ 1,
+  random = ~ vm(GID, Pinv.sparse):fa(LocYear, 2),
+  residual = ~ dsum(~ units),
+  data   = data
+)
+```
+
+
+### **Factor analytic (FA) with both G and P kernels**
+```{r}
+Mod_FA_G_P <- asreml(
+  fixed  = trait ~ 1,
+  random = ~ vm(GID, Ginv.sparse):fa(LocYear, 2)
+         + vm(GID, Pinv.sparse):fa(LocYear, 2),
+  residual = ~ dsum(~ units),
+  data   = data
+)
+```
+

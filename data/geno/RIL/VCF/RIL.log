@@ -1,0 +1,35 @@
+PLINK v1.90b6.26 64-bit (2 Apr 2022)
+Options in effect:
+  --allow-extra-chr
+  --map /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL/PLINK_080822_0733/RIL.map
+  --out /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL
+  --ped /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL/PLINK_080822_0733/RIL.ped
+  --recode vcf
+
+Hostname: karl-XPS-13-9370
+Working directory: /home/karl/Downloads/plink_linux_x86_64_20220402
+Start time: Tue Aug  9 10:52:21 2022
+
+Random number seed: 1660056741
+15703 MB RAM detected; reserving 7851 MB for main workspace.
+Scanning .ped file... done.
+Performing single-pass .bed write (44040 variants, 189 people).
+--file:
+/home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL-temporary.bed +
+/home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL-temporary.bim +
+/home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL-temporary.fam
+written.
+44040 variants loaded from .bim file.
+189 people (0 males, 0 females, 189 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to
+/home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL.nosex .
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 189 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate is 0.915821.
+44040 variants and 189 people pass filters and QC.
+Note: No phenotypes present.
+--recode vcf to /home/karl/git/NY-winter-barley-analysis/data/genotypes/RIL.vcf
+... done.
+
+End time: Tue Aug  9 10:52:21 2022

@@ -1,0 +1,501 @@
+---
+title: "2. Spectral data Spatial BLUP"
+output: html_document
+author: "sss322"
+date: "2024-12_06"
+---
+
+
+```{r setup, include=FALSE, warning=FALSE, eval=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Introduction
+This document provides an overview of the spatial BLUP wth the multi-spectral drone imagery data. The goal is to conduct the first BLUP stage with the vegetation indices and explore data distribution.
+
+
+
+## **1. Importing Dependencies **
+Loading dependencies
+```{r, message=FALSE}
+library(readr)
+library(readxl)
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(tidyr)
+library(ASRgenomics)
+library(factoextra)
+library(fda)
+library(ASRtriala)
+library(writexl)
+library(openxlsx)
+library(jsonlite)
+library(data.table)
+Sys.setlocale("LC_TIME", "C")
+```
+
+
+## **2. Setting the working directory and importing the data**
+```{r, message=FALSE}
+load("data/wmb_multi_alldata.Rdata")
+table(multi$Env, multi$Timepoint)
+```
+
+```{r, message=FALSE}
+multi<- multi %>% filter(Env ==  "MCG25")
+multi$GID<- as.factor(multi$GID)
+colnames(multi)[3]<- "timepoint"
+multi<- multi%>% arrange(Env, timepoint)
+```
+
+
+
+
+## **3. Generating genotype BLUP-s to eliminate spatial effects **
+Model Selection Fit models based on statistical goodness-of-fit measures.
+```{r}
+#Setup the models to fit for each TP and VI
+model.setup <- ASRtriala::model.setup
+specs.single <- model.setup %>%
+  filter(add.rep == FALSE) %>%
+  filter(add.ibk == FALSE)
+```
+
+```{r, eval=FALSE}
+# Create an empty list to store all models stats for all indices
+all_indices_models_stats <- list()
+all_models_stats <- list()
+
+# List of timepoints to loop through
+timepoints <- (unique(multi$timepoint))
+#timepoints <- "2"
+
+
+# List of indices to loop through
+indices<- colnames(multi)[20:29]
+#indices<- c("NDVI")
+
+# Get unique levels of Env
+env_levels <- unique(multi$Env)
+#env_levels <- "SNY22"
+
+# Create an empty list to store models stats for each Env
+all_env_models_stats <- list()
+
+# Outer loop through each Env level
+for (env in env_levels) {
+  # Filter data for the current Env level
+  env_data <- multi[multi$Env == env, ]
+  
+  # Create an empty list to store models stats for each index within this Env
+  all_indices_models_stats <- list()
+  
+  # Get unique indices for the current Env
+  #indices <- unique(env_data$index_column) # Replace 'index_column' with the column name for indices
+
+  # Loop through each index
+  for (index in indices) {
+    # Create an empty list to store models stats for each timepoint for the current index
+    all_models_stats <- list()
+    
+    # Get unique timepoints for the current index
+    timepoints <- unique(env_data$timepoint)
+
+    # Loop through each timepoint
+    for (tp in timepoints) {
+      st.data <- env_data[env_data$timepoint == tp, ]
+      st.data$GID <- as.factor(st.data$GID)
+      st.data$Row <- as.factor(st.data$Row)
+      st.data$Column <- as.factor(st.data$Column)  
+      # Use the current index in the response variable
+      models.stats <- select.single(
+        data = st.data,
+        gen = "GID",
+        row = "Row",
+        col = "Column",
+        resp = index,
+        type.gen = "random",
+        data.model = specs.single,
+        threshold = 3.5,
+        pworkspace = "16gb",
+        criteria = "logDopt"
+
+      )
+      
+      # Store the goodness-of-fit statistics for the current timepoint and index
+      all_models_stats[[tp]] <- models.stats$gof.stats
+    }
+    
+    # Store the model stats for this index in the overall list
+    all_indices_models_stats[[index]] <- all_models_stats
+  }
+  
+  # Store the model stats for this Env in the overall list
+  all_env_models_stats[[env]] <- all_indices_models_stats
+  
+  # Save the models stats for the current Env level to a separate file
+  # save(all_indices_models_stats, file = paste0("model_stats_", env, ".Rdata"))
+}
+
+# Save the overall stats for all Envs to a single file
+# save(all_env_models_stats, file = "all_env_models_stats.Rdata")
+
+#all_env_models_stats$HELF24$NDVI
+
+#save the results
+save(all_indices_models_stats, file= "spec_mod_stats.Rdata")
+
+```
+
+
+
+
+
+## **4. Select the best-of-fit models**
+```{r, eval=FALSE}
+#load("blup1_fit_stats/mod_stats.Rdata")
+load("data/mod_statsNY.Rdata")
+all_models_stats<- mod_statsNY[[1]]
+timepoints <- 1:6
+
+all_models_stats$NDVI[[7]][1:14,]
+model_selections_list <- list(
+  ENDVI  = c( 13, 3, 1, 3, 6, 1, 1, 1),#
+  GIPVI  = c( 1, 1, 1, 4, 1, 1, 1, 1),#
+  SAVI   = c( 3, 3, 5, 2, 6, 7, 1, 1),#
+  GDVI   = c( 3, 4, 4, 1, 5, 1, 1, 1),#
+  GNDVI  = c( 3, 1, 1, 3, 2, 1, 1, 1),#
+  EVI    = c( 1, 1, 6, 1, 1, 1, 1, 1),#
+  NDVI   = c( 1, 5, 12, 1, 1, 1, 1, 1),#
+  NDRE   = c( 11, 2, 2, 5, 5, 3, 1, 1),#
+  PSRI   = c( 1, 1, 1, 1, 1, 1, 1, 1),#
+  NRI    = c( 1, 1, 5, 3, 1, 1, 1, 1)#
+)
+
+
+# Initialize a data frame to store the results of selected models for each index
+mod_stats_df <- data.frame()
+
+# Loop through each vegetative index in the model selections list
+for (index_name in names(model_selections_list)) {
+  
+  # Get the model selections for the current index
+  model_selections <- model_selections_list[[index_name]]
+  
+  # Get the dataframe of models for the current index from all_models_stats
+  index_models_df <- all_models_stats[[1]] # [[index_name]]
+  
+  # Loop through timepoints and model selections
+  for (i in seq_along(timepoints)) {
+    tp <- timepoints[i]
+    model_index <- model_selections[i]
+    
+    # Check if the timepoint exists in the index_models_df
+    if (is.data.frame(index_models_df[[tp]])) {
+      # Filter the dataframe to get the model for the selected timepoint
+      models_at_tp <- as.data.frame(index_models_df[tp])
+      
+      # Check if the model index is valid
+      if (model_index > 0 && model_index <= nrow(models_at_tp)) {
+        sel_model <- models_at_tp[model_index, ]  # Select the entire row
+        sel_model$timepoint <- tp  # Add timepoint column to the selected model
+        sel_model$VI <- index_name  # Add the index name
+        
+        # Append the selected model to the data frame
+        mod_stats_df <- rbind(mod_stats_df, sel_model)
+      } else {
+        cat("Model index", model_index, "is out of range for timepoint", tp, "in index", index_name, "\n")
+      }
+    } else {
+      cat("No models available for timepoint", tp, "in index", index_name, "\n")
+    }
+  }
+}
+
+# Display the structure of mod_stats_df
+str(mod_stats_df)
+table(mod_stats_df$VI, mod_stats_df$timepoint)
+# Optionally, you can save the data frame for future use
+save(all_env_models_stats, file = "mod_stats_fitNY.Rdata")
+save(all_env_models_stats)
+
+mod_stats21$Env<- "KET21"
+mod_stats22$Env<- "SNY22"
+mod_stats23$Env<- "MCG23"
+mod_stats24$Env<- "HELF24"
+
+mod_stats <- rbind(mod_stats21, mod_stats22, mod_stats23, mod_stats24)
+save(mod_stats, file= "data/spec_mod_stats_sel.Rdata")
+```
+
+
+
+
+## **5. Fit the selected models**
+```{r, eval=FALSE }
+load("data/wmb_multi_alldata.Rdata")
+load("data/spec_mod_stats.Rdata")
+multi<- multi %>% filter(Env ==  "HELF24")
+multi$GID<- as.factor(multi$GID)
+multi<- multi%>% arrange(timepoint)
+
+#################
+all_selected_models_df<- mod_stats24
+#Needs to be adapted for a loop over several VI-s. 
+# Initialize an empty list to store all predictions
+all_predictions <- list()
+
+
+# Loop through each unique vegetative index
+for (index in unique(all_selected_models_df$VI)) {
+  
+  # Filter the dataframe for the selected index
+  sel_models_index <- filter(all_selected_models_df, VI == index)
+  # Loop through each unique timepoint for the current index
+  for (tp in unique(sel_models_index$timepoint)) {
+    
+    # Filter the selected models for the current timepoint and index
+    sel.m <- filter(sel_models_index, timepoint == tp)
+    #sel.m<- sel.m[,c(-18, -19)]
+    # Filter the original data for the current timepoint
+    st.data <- filter(multi, timepoint == tp)
+    
+    # Fit the model for the selected data and model specifications
+    mt.f <- fit.single(st.data, gen = "GID",
+                       row = "Row", col = "Column",
+                       resp = index, 
+                       type.gen = "random",
+                       add.row = sel.m$add.row, 
+                       add.col = sel.m$add.col,
+                       trend.row = sel.m$trend.row,
+                       trend.col = sel.m$trend.col,
+                       type.residual = sel.m$type.residual, 
+                       add.nugget = sel.m$add.nugget,
+                       threshold = 3.5)
+    
+    # Extract predictions and add timepoint and index columns
+    pred <- mt.f$predictions
+    pred$timepoint <- tp
+    pred$VI <- index  # Track the vegetative index in predictions
+    
+    # Store predictions in the list with a combined key of timepoint and index
+    all_predictions[[paste(index, tp, sep = "_")]] <- pred
+  }
+}
+all_predictions1<- all_predictions[c(-2, -18, -26, -42)] 
+all_predictions1<- all_predictions1[-2]
+# Combine all predictions into a single data frame
+final_predictions <- do.call(rbind, all_predictions1)
+
+# Modify the final predictions data frame as needed
+preds24<- final_predictions 
+
+
+preds21$Env<- "KET21"
+preds22$Env<- "SNY22"
+preds23$Env<- "MCG23"
+preds24$Env<- "HELF24"
+
+preds<- rbind(preds21, preds22, preds23, preds24)
+
+table(multi$Env)
+
+#save the predictions
+
+save(preds, file= "data/spec_blup_preds.Rdata")
+
+```
+
+
+
+## **6. Adding flight time data to the predicitons and filter for QC**
+```{r}
+load("data/spec_blup_preds.Rdata")
+colnames(multi)
+# Create a mapping of timepoint to JD
+timepoint_JD <- multi[,c(1, 10,34)] %>%
+  distinct()  # Keep only unique combinations
+preds <- preds %>%
+  left_join(timepoint_JD, by = c("Env","timepoint"))
+```
+
+
+## **7. QC for VI BLUP-s**
+```{r}
+table(preds$Env , preds$timepoint)
+
+preds$JD <- as.numeric(preds$JDf)
+
+indices <- unique(preds$VI)
+
+# Function to create plots for a given index
+create_plots <- function(index) {
+  # Filter data for the current index
+  preds1 <- preds %>% filter(VI == index)
+  
+  # Extract unique environment values and collapse them into a string
+  env_values <- unique(preds1$Env)
+  env_text <- paste(env_values, collapse = ", ")
+  
+  # Create the histogram plot
+  histogram <- ggplot(preds1, aes(x = predicted.value)) +
+    geom_histogram(fill = "skyblue", color = "black") +
+    facet_wrap(~ Env + timepoint, scales = "free_x") +
+    labs(
+      x = index,
+      y = "Count",
+      title = paste("Histogram of", index, "for each timepoint in", env_text)
+    ) +
+    theme_minimal()
+  
+  print(histogram)
+}
+
+# Loop through all indices
+for (index in indices) {
+  create_plots(index)
+}
+
+#boxplot(mod_stats_df$h2.vc ~  mod_stats_df$timepoint )
+#plot(mod_stats_df$h2.vc ~  mod_stats_df$timepoint )
+
+preds1<- preds #%>% filter(!timepoint %in% c("1", "7", "10")) %>% filter(!VI  %in% c("GIPVI"))
+# Define a function to create a smooth plot for a given index
+create_plot <- function(index) {
+  # Filter the data for the current index
+  preds1 <- preds %>% filter(VI == index)
+  
+  # Create the smooth plot
+  smooth_plot <- ggplot(preds1, aes(x = JD, 
+                                    y = predicted.value, 
+                                    group = GID, 
+                                    color = as.factor(GID))) +
+    geom_smooth(linewidth = 0.5, alpha = 0.01) +
+    labs(x = "", 
+         y = "VI", 
+         title = paste("Vegetative Indices Over Time:", index)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 18, face = "bold"),
+      axis.title = element_text(size = 18),
+      axis.text = element_text(size = 14),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA, size = 1),
+      legend.position = "none"
+    ) +
+    facet_wrap(~ Env + VI, scales = "free_x") +
+    scale_x_continuous(breaks = c(0, 50, 100, 150, 200), 
+                       labels = c("Oct", "Dec", "Feb", "Apr", "Jun")) +
+    scale_color_manual(values = rainbow(length(unique(preds1$GID))))
+  
+  print(smooth_plot)
+}
+
+# Get unique indices (assuming the indices are in the 'VI' column)
+indices <- unique(preds$VI)
+
+# Loop over each index and create the plot
+for (index in indices) {
+  create_plot(index)
+}
+```
+
+
+
+## **8. Summary statistics for the BLUP heritabilities **
+```{r}
+library(patchwork)
+load("data/mod_statsNY.Rdata")
+mod_stats_df<- mod_stats #%#>% filter(!timepoint %in% c("7"))#, "10", "1"))
+
+summary_stats <- mod_stats_df %>%
+  group_by(VI, Env) %>%
+  summarize(
+    mean_h2.pev = mean(h2.pev, na.rm = TRUE),
+    sd_h2.pev = sd(h2.pev, na.rm = TRUE),
+    min_h2.pev = min(h2.pev, na.rm = TRUE),
+    max_h2.pev = max(h2.pev, na.rm = TRUE),
+    n = n()  # Count of observations
+  )
+
+# View summary statistics
+print(summary_stats)
+#boxplot(mod_stats_df$h2.pev ~ mod_stats_df$timepoint, main= "Heritability of VIs at TPs")
+
+
+
+summary_stats <- mod_stats_df %>%
+  group_by(timepoint, Env) %>%
+  summarize(
+    mean_h2.pev = mean(h2.pev, na.rm = TRUE),
+    sd_h2.pev = sd(h2.pev, na.rm = TRUE),
+    min_h2.pev = min(h2.pev, na.rm = TRUE),
+    max_h2.pev = max(h2.pev, na.rm = TRUE),
+    n = n()  # Count of observations
+  )
+
+
+
+plot2 <- ggplot(mod_stats_df, aes(x = as.factor(timepoint), y = h2.pev)) +
+  geom_boxplot() +  
+  scale_fill_brewer() +
+  facet_wrap(~ Env ) +
+  labs(
+    x = "Timepoint",
+    y = "h2.pev",  title= "Heritability of TPs"
+  ) +
+  theme_minimal()
+######################################
+
+
+
+summary_stats <- mod_stats_df %>%
+  group_by(VI, Env) %>%
+  summarize(
+    mean_h2.pev = mean(h2.pev, na.rm = TRUE),
+    sd_h2.pev = sd(h2.pev, na.rm = TRUE),
+    min_h2.pev = min(h2.pev, na.rm = TRUE),
+    max_h2.pev = max(h2.pev, na.rm = TRUE),
+    n = n()  # Count of observations
+  )
+
+# View summary statistics
+print(summary_stats)
+
+
+# Create a combined boxplot
+# First plot: H2 by Vegetative Index (VI)
+plot1 <- ggplot(mod_stats_df, aes(x = VI, y = h2.pev)) +
+  geom_boxplot() + 
+  facet_wrap(~ Env ) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(
+    title = "Heritability of VIs and Timepoints",
+    x = "Vegetative Index (VI)",
+    y = "h2.pev"
+  ) +
+    theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+# Second plot: H2 by Timepoint
+plot2 <- ggplot(mod_stats_df, aes(x = as.factor(timepoint), y = h2.pev)) +
+  geom_boxplot() +
+  facet_wrap(~ Env ) +
+  scale_fill_brewer() +
+  labs(
+    x = "Timepoint",
+    y = "h2.pev"
+  ) +
+  theme_minimal()
+
+# Combine plots side by side
+combined_plot <- plot1 + plot2
+combined_plot
+
+```
+

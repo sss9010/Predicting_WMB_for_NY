@@ -1,0 +1,395 @@
+---
+title: "1.Data_Pre-Processing"
+author: "sss322"
+date: "2025-30-08"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# **0. Libraries & project setup**
+```{r, message=FALSE, warning=FALSE}
+pkgs <- c(
+  "dplyr","tidyr","tibble","stringr","readr","readxl",
+  "ggplot2","openxlsx","rrBLUP",
+  "RSpectra", 
+  "ASRgenomics",     
+  "asreml"          
+  # "ASRtriala"      
+)
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+
+r <- function(...) file.path(getwd(), ...)
+r()
+```
+
+
+# **1.Pedigree: load & family mapping**
+```{r}
+#load(r("data/geno/wmb_pedigree.Rdata"))
+wmb_ped<- read_xlsx("wmb_ped.xlsx")
+
+wmb_ped <- wmb_ped %>%
+  mutate(
+    fam = if_else(Population == "Parents", "Parent", paste(Par1, Par2, sep = " × ")),
+    fam = if_else(fam == "0 × 0", "Parent", fam),
+    Par2 = if_else(Par2 == "0", "Parent", Par2)
+  )
+
+# Map for joins later
+fam_map <- wmb_ped %>%
+  dplyr::select(GID = Ind, Fam = fam)
+table(fam_map$Fam)
+```
+
+
+
+
+# **2.Genotype: raw markers + SNP positions (Morex V3)**
+
+```{r}
+# Raw HapMap
+wmb_gt <- read_delim(
+  r("data/geno/WMBgenoDH_RIL.hmp.txt"),
+  delim = "\t", escape_double = FALSE, trim_ws = TRUE,
+  col_types = cols(.default = col_character())
+)
+
+#wmb_gt <- read_delim(
+ # r("data/geno/all_filter.hmp.txt"),
+  #delim = "\t", escape_double = FALSE, trim_ws = TRUE,
+  #col_types = cols(.default = col_character()))
+
+
+# SNP positions (Morex V3): 
+pos_V3 <- read_excel(r("data/geno/SNPPositions_50k_on_MorexV3.xlsx")) %>%
+  rename(`rs#` = 1, chrom = 2, pos = 3) %>%
+  mutate(
+    chrom = chrom %>%
+      str_replace_all("chr|CHR|H|_random|r", "") %>%
+      substr(1, 1),
+    chrom = case_when(
+      chrom %in% as.character(1:7) ~ chrom,
+      TRUE ~ "0"  # unknown / unplaced
+    )
+  ) %>%
+  arrange(chrom, pos)
+
+# Join positions to genotype table
+wmb_gt <- wmb_gt %>%
+  dplyr::select(-any_of(c("chrom","pos"))) %>%
+  left_join(pos_V3, by = "rs#") %>%
+  mutate(chrom = replace_na(chrom, "0")) %>%
+  relocate(chrom, pos, .after = `rs#`) %>%
+  arrange(chrom, pos)
+
+
+mat<- t(as.matrix(wmb_gt[,12:677]))
+#mat<- t(as.matrix(wmb_gt[,12:666]))
+colnames(mat)<- wmb_gt$`rs#`
+
+
+###############################################################################################
+# Convert a genotype matrix/data frame (cols = markers, rows = samples) to 0/1/2
+code012_from_iupac <- function(G, minor_is_2 = TRUE) {
+  G <- as.data.frame(G, stringsAsFactors = FALSE)
+
+  # normalize calls to single-letter IUPAC (A,C,G,T,R,Y,S,W,K,M,N)
+  norm_one <- function(x) {
+    x <- toupper(trimws(as.character(x)))
+    x[x %in% c("-", ".", "", "NA")] <- "N"
+    x <- gsub("/", "", x); x <- gsub("\\|", "", x)
+    # map two-letter diplotypes to IUPAC
+    map2 <- c(AA="A", CC="C", GG="G", TT="T",
+              AG="R", GA="R", CT="Y", TC="Y",
+              CG="S", GC="S", AT="W", TA="W",
+              GT="K", TG="K", AC="M", CA="M")
+    two <- nchar(x) == 2
+    x[two] <- map2[x[two]]
+    # if already "AA","BB" style with same letter, collapse
+    x[nchar(x) == 1 & !(x %in% c("A","C","G","T","R","Y","S","W","K","M","N"))] <- NA
+    x  }
+  IUPAC <- list(
+    A = "A", C = "C", G = "G", T = "T",
+    R = c("A","G"), Y = c("C","T"), S = c("G","C"),
+    W = c("A","T"), K = c("G","T"), M = c("A","C")  )
+
+  out <- matrix(NA_real_, nrow = nrow(G), ncol = ncol(G),
+                dimnames = list(rownames(G), colnames(G)))
+
+  for (j in seq_len(ncol(G))) {
+    col <- norm_one(G[[j]])
+    # infer the two alleles from data (weighted by hets)
+    alleles_obs <- unlist(IUPAC[col[!is.na(col) & col != "N"]])
+    alleles_obs <- alleles_obs[alleles_obs %in% c("A","C","G","T")]
+    if (length(alleles_obs) == 0L) next
+    af <- sort(table(alleles_obs), decreasing = TRUE)
+
+    if (length(af) == 1L) {
+      major <- names(af)[1]; minor <- setdiff(c("A","C","G","T"), major)[1]
+    } else {
+      major <- names(af)[1]; minor <- names(af)[2]    }
+
+    out[, j] <- vapply(col, function(z) {
+      if (is.na(z) || z == "N") return(NA_real_)
+      if (z %in% c("A","C","G","T")) {
+        if (z == major) return(0)
+        if (z == minor) return(if (minor_is_2) 2 else 2)
+        return(NA_real_) # third allele present -> set NA
+      } else {        # heterozygote codes
+        pair <- IUPAC[[z]]
+        if (all(c(major, minor) %in% pair)) return(1)
+        return(NA_real_)   }
+    }, numeric(1))  }
+  as.data.frame(out, check.names = FALSE)}
+###############################################################################################
+geno012 <- code012_from_iupac(mat, minor_is_2 = TRUE)
+mat<- as.matrix(geno012)
+
+A1<- ASRgenomics::G.matrix(mat, method = "VanRaden", na.string = "NA")
+A1<- A1$G
+save( A1, file= "data/geno/WMB_master_geno.Rdata")
+###############################################################################################
+D1 <- ASRgenomics::G.matrix(
+  mat,
+  method = "Vitezica",
+  na.string = "NA"
+)
+
+A1 <- D1$G
+save(A1, file= "data/geno/WMB_master_geno_D.Rdata")
+```
+
+
+# **3. Relationship matrix (A) & PCA**
+```{r}
+# Load precomputed additive relationship matrix A1
+#load(r("data/geno/WMB_master_geno_OLD.Rdata"))
+load(r("data/geno/WMB_master_geno.Rdata"))
+WinterRelationship <- A1
+rm(A1)
+
+# PCA using RSpectra (fast for large symmetric matrices)
+k <- min(10, nrow(WinterRelationship) - 1)
+WinterPCA <- eigs_sym(WinterRelationship, k = k)
+WinterPVEPCA <- WinterPCA$values / sum(WinterPCA$values)
+
+# Scores table
+WinterPCA_scores <- as.data.frame(WinterPCA$vectors)
+colnames(WinterPCA_scores) <- paste0("PC", seq_len(ncol(WinterPCA_scores)))
+WinterPCA_scores$GID <- rownames(WinterRelationship)
+
+# Merge with pedigree/family
+WinterPCA_annot <- WinterPCA_scores %>%
+  left_join(fam_map %>% rename(fam = Fam), by = "GID") #%>%
+ # tidyr::drop_na(fam)
+
+# Quick look
+head(WinterPCA_annot[, c("GID","PC1","PC2","fam")])
+```
+
+
+# **4. PCA scatter (PC1 vs PC2)**
+```{r}
+library(ggplot2)
+
+ggplot(WinterPCA_annot, aes(x = PC1, y = PC2)) +
+  # black, large points for Parents
+  geom_point(
+    data = subset(WinterPCA_annot, fam == "Parent"),
+    color = "black", size = 4, alpha = 0.9
+  ) +
+  # colored points for all others
+  geom_point(
+    data = subset(WinterPCA_annot, fam != "Parent"),
+    aes(color = fam), size = 2.5, alpha = 0.8
+  ) +
+  labs(
+    x = sprintf("PC1 (%.1f%% PVE)", 100 * WinterPVEPCA[1]),
+    y = sprintf("PC2 (%.1f%% PVE)", 100 * WinterPVEPCA[2]),
+    color = "Family"
+  ) +
+  #theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+table(WinterPCA_annot$fam)
+table(fam_map$Fam)
+
+A1<- D1$G
+ASRgenomics::kinship.heatmap(A1)
+```
+
+
+# **5. Malting quality (MQ): import**
+```{r}
+MQ1 <- openxlsx::read.xlsx(r("data/pheno/MQ/WMBmstrMQ.xlsx")) %>%
+  filter(Test == "WFullLab", Location != "Snyder") %>%
+  mutate(
+    plot_id = paste0(Year, PLOTID)
+  )
+colnames(MQ1)
+
+MQ1<- MQ1[,c(1,33, 32, 5:18, 20)]
+```
+
+ 
+# **6. Spectral & agronomic: load multi-table and merge**
+```{r}
+load("C:/Users/Siim Sepp/NY_WMB/data/wmb_multi_alldata.Rdata")
+
+data_all <- multi %>%
+  left_join(MQ1[,c(-1,-3)], by = c("plot_id"))
+
+unique(data_all$KernelWeight.mg.)
+
+# Optional: add family labels to data_all
+data_all <- data_all %>% left_join(fam_map, by = "GID")
+
+# Persist merged data for downstream analyses
+save(data_all, file = r("data/WMB_pheno.Rdata"))
+```
+
+
+# **7. Subset into working dataframes**
+
+**Agronomic data**
+```{r}
+# Keep only Timepoint 1 rows with positive yield
+data_ag <- data_all %>%
+  filter(Timepoint == "1", .data$yield_kgha > 0)
+
+
+data_ag <- data_ag %>%
+  dplyr::select(
+    plot_id, GID, Env, Timepoint,Row, Column,
+    yield_kgha, HD_JD, winter_survival, 
+    Fam  )
+
+save(data_ag, file = r("data/data_ag.Rdata"))
+
+
+#MQ
+
+colnames(data_ag)
+data_mq <- MQ1 %>% left_join(data_ag[,c(1,5,6,10)], by= c("plot_id"))
+data_mq <- data_mq[,c(-6, -8, -9)]
+colnames(data_mq)
+data_mq<- data_mq %>% filter(Env %in% c("MCG23", "HELF24", "MCG25"))
+table(data_mq$Env)
+save(data_mq, file = r("data/data_mq.Rdata"))
+```
+
+
+
+**Spectral data**
+```{r}
+# Identify VI columns robustly by name pattern (edit if you prefer a fixed list)
+VI_cols <- names(multi)[grepl("NDVI|NDRE|EVI|GNDVI|NRI|SAVI|ENDVI|GIPVI|PSRI", names(multi), ignore.case = FALSE)]
+
+# Exclude problematic Env–Timepoint combos
+drops <- dplyr::bind_rows(
+  tibble::tribble(~Env, ~Timepoint, "SNY22","7", "HELF24","1"),
+  tibble::tibble(Env = "MCG25", Timepoint = as.character(1:5))
+)
+
+
+drops$Timepoint <- as.numeric(drops$Timepoint)
+multi$Timepoint <- as.numeric(multi$Timepoint)
+
+multi_f <- multi %>%
+  filter(DAS >90) %>%
+  #anti_join(drops, by = c("Env","Timepoint")) %>%
+  arrange(Env, Timepoint)
+
+# Build per-Env wide matrices for *each* VI AND a "combined" matrix per Env.
+envs <- unique(multi_f$Env)
+
+
+# Helper to wide-pivot one VI in one Env
+wide_one_vi <- function(df_env, vi_name) {
+  df_env %>%
+    dplyr::select(plot_id, Timepoint, all_of(vi_name)) %>%
+    distinct(plot_id, Timepoint, .keep_all = TRUE) %>%
+    tidyr::pivot_wider(names_from = Timepoint, values_from = all_of(vi_name))
+}
+
+# Helper to wide-pivot all VI columns together (“combined”)
+wide_combined <- function(df_env) {
+  df_env %>%
+    dplyr::select(plot_id, Timepoint, all_of(VI_cols)) %>%
+    distinct(plot_id, Timepoint, .keep_all = TRUE) %>%
+    tidyr::pivot_wider(names_from = Timepoint, values_from = all_of(VI_cols))
+}
+
+# Construct VImats as: list[Env][[vi]] and [[combined]]
+VImats <- setNames(vector("list", length(envs)), envs)
+
+for (e in envs) {
+  df_e <- multi_f %>% filter(Env == e)
+  # per-VI
+  per_vi <- setNames(vector("list", length(VI_cols)), VI_cols)
+  for (vi in VI_cols) per_vi[[vi]] <- wide_one_vi(df_e, vi)
+  # combined
+  per_vi[["combined"]] <- wide_combined(df_e)
+  VImats[[e]] <- per_vi
+}
+
+# Also keep a long-ish spectral dataframe with family labels (if needed)
+data_sp <- multi_f %>%
+  dplyr::select(plot_id, GID, Env, Timepoint, all_of(VI_cols)) %>%
+  left_join(fam_map, by = "GID")
+
+# Save outputs
+save(VImats, file = r("data/VImat.Rdata"))
+save(data_sp, file = r("data/data_sp.Rdata"))
+
+# Quick check
+table(data_sp$Env, data_sp$Timepoint)
+```
+
+  
+  
+#VImat with the GDD nr from Jan1 of the year.   
+```{r}
+load("data/JDmap.Rdata")
+
+setdiff(names(multi_f), names(JD_map))
+setdiff(names(JD_map), names(multi_f))
+
+colnames(JD_map)
+multi_f$Environment <- multi_f$Env
+multi_f1<- left_join(multi_f, JD_map[,c(2,6,10)], by= c("Environment", "Timepoint"))
+
+####################################################
+multi_f1$Timepoint<- multi_f1$GDD
+
+# Construct VImats as: list[Env][[vi]] and [[combined]]
+VImats <- setNames(vector("list", length(envs)), envs)
+
+for (e in envs) {
+  df_e <- multi_f1 %>% filter(Env == e)
+  # per-VI
+  per_vi <- setNames(vector("list", length(VI_cols)), VI_cols)
+  for (vi in VI_cols) per_vi[[vi]] <- wide_one_vi(df_e, vi)
+  # combined
+  per_vi[["combined"]] <- wide_combined(df_e)
+  VImats[[e]] <- per_vi
+}
+
+# Also keep a long-ish spectral dataframe with family labels (if needed)
+data_sp <- multi_f1 %>%
+  dplyr::select(plot_id, GID, Env, Timepoint, all_of(VI_cols)) %>%
+  left_join(fam_map, by = "GID")
+
+# Save outputs
+save(VImats, file = r("data/VImatG.Rdata"))
+save(data_sp, file = r("data/data_spG.Rdata"))
+
+# Quick check
+table(data_sp$Env, data_sp$Timepoint)
+```
+
