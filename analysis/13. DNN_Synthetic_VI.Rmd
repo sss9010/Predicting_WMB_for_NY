@@ -304,19 +304,24 @@ cat("  Predictor: VI(1) → 8 → 1 (trait)\n")
 
 # Training
 
-For each **Timepoint × Environment** group and each trait the procedure is:
+**Leave-One-Group-Out (LOGO) cross-validation** is used, where each fold holds
+out one of the five Timepoint × Environment groups and trains on the remaining
+four:
 
-1. Keep only the rows in that group that have a non-NA trait value.
-2. Randomly split 80 % training / 20 % test (repeated `n_reps` times).
-3. Train a fresh `SyntheticVIModel` on the training split.
-4. Predict the test split; compute Pearson *r* and RMSE on the original
-   (back-transformed) scale.
+| Fold | Train | Validate |
+|------|-------|----------|
+| 1 | KET21_TP4, MCG23_TP5, MCG25_TP12, SNY22_TP6 | HELF24_TP7 |
+| 2 | HELF24_TP7, MCG23_TP5, MCG25_TP12, SNY22_TP6 | KET21_TP4 |
+| 3 | HELF24_TP7, KET21_TP4, MCG25_TP12, SNY22_TP6 | MCG23_TP5 |
+| 4 | HELF24_TP7, KET21_TP4, MCG23_TP5, SNY22_TP6 | MCG25_TP12 |
+| 5 | HELF24_TP7, KET21_TP4, MCG23_TP5, MCG25_TP12 | SNY22_TP6 |
 
-Groups with fewer than `min_group_n` non-NA observations for a given trait
-are skipped.
+Each fold is repeated `n_reps` times with different training seeds to account
+for stochastic initialisation. After CV, a final model is trained on all five
+groups to extract the **Synthetic VI formula**.
 
 ```{r training-functions}
-# ── Helper: build band + label tensors from a data frame subset ────────────
+# ── Helper: build band + label tensors ────────────────────────────────────
 make_tensors <- function(df, trait) {
   df_sub <- df[!is.na(df[[trait]]), ]
   list(
@@ -326,17 +331,18 @@ make_tensors <- function(df, trait) {
   )
 }
 
-# ── Training loop for a single split ──────────────────────────────────────
+# ── Core training loop ─────────────────────────────────────────────────────
 train_model <- function(train_df, trait,
-                        epochs = 200, lr = 5e-3, batch_size = 64,
-                        verbose = FALSE) {
+                        epochs = 300, lr = 3e-3, batch_size = 64,
+                        seed = NULL, verbose = FALSE) {
+  if (!is.null(seed)) torch_manual_seed(seed)
   tensors <- make_tensors(train_df, trait)
   n       <- tensors$bands$size(1)
-  if (n < 5) return(NULL)
+  if (n < 10) return(NULL)
 
   model <- SyntheticVIModel(n_bands = length(BAND_NAMES), pred_h = 8)
   opt   <- optim_adam(model$parameters, lr = lr, weight_decay = 1e-4)
-  sched <- lr_step(opt, step_size = 80, gamma = 0.5)
+  sched <- lr_step(opt, step_size = 100, gamma = 0.5)
 
   model$train()
   for (ep in seq_len(epochs)) {
@@ -351,64 +357,60 @@ train_model <- function(train_df, trait,
       opt$step()
     }
     sched$step()
-    if (verbose && ep %% 50 == 0)
-      cat(sprintf("  ep %d loss %.4f\n", ep, loss$item()))
+    if (verbose && ep %% 100 == 0)
+      cat(sprintf("  ep %d | loss %.4f\n", ep, loss$item()))
   }
   model$eval()
   model
 }
 
-# ── Within-group CV for one trait ─────────────────────────────────────────
-# n_reps repeated 80/20 random splits inside each Timepoint × Env group
-within_group_cv <- function(data, trait,
-                            n_reps = 5, train_frac = 0.8,
-                            min_group_n = 15,
-                            epochs = 200, lr = 5e-3, batch_size = 64) {
-  map_dfr(group_levels, function(grp) {
-    grp_df <- data %>% filter(group == grp, !is.na(.data[[trait]]))
-    if (nrow(grp_df) < min_group_n)
-      return(tibble(group = grp, rep = NA_integer_,
-                    n_test = 0L, r = NA_real_, rmse = NA_real_))
+# ── LOGO cross-validation for one trait ───────────────────────────────────
+# Trains on 4 groups, validates on the held-out 5th; repeated n_reps times.
+logo_cv <- function(data, trait, n_reps = 5,
+                    epochs = 300, lr = 3e-3, batch_size = 64) {
+  map_dfr(group_levels, function(held_out) {
+    train_df <- data %>% filter(group != held_out, !is.na(.data[[trait]]))
+    test_df  <- data %>% filter(group == held_out, !is.na(.data[[trait]]))
 
-    env_val <- as.character(grp_df$Env[1])
-    tp_val  <- grp_df$Timepoint[1]
+    env_val <- as.character(test_df$Env[1])
+    tp_val  <- test_df$Timepoint[1]
+
+    if (nrow(train_df) < 10 || nrow(test_df) < 2)
+      return(tibble(held_out = held_out, Env = env_val, Timepoint = tp_val,
+                    rep = NA_integer_, n_test = nrow(test_df),
+                    r = NA_real_, rmse = NA_real_))
 
     map_dfr(seq_len(n_reps), function(rep_i) {
-      tr_idx  <- sample(nrow(grp_df), floor(train_frac * nrow(grp_df)))
-      te_idx  <- setdiff(seq_len(nrow(grp_df)), tr_idx)
-      if (length(te_idx) < 2)
-        return(tibble(group = grp, rep = rep_i,
-                      n_test = 0L, r = NA_real_, rmse = NA_real_))
-
       model <- tryCatch(
-        train_model(grp_df[tr_idx, ], trait,
-                    epochs = epochs, lr = lr, batch_size = batch_size),
-        error = function(e) { message(grp, " rep", rep_i, ": ", e$message); NULL }
+        train_model(train_df, trait,
+                    epochs = epochs, lr = lr, batch_size = batch_size,
+                    seed = rep_i * 100L),
+        error = function(e) { message(held_out, " rep", rep_i, ": ", e$message); NULL }
       )
       if (is.null(model))
-        return(tibble(group = grp, rep = rep_i,
-                      n_test = length(te_idx), r = NA_real_, rmse = NA_real_))
+        return(tibble(held_out = held_out, Env = env_val, Timepoint = tp_val,
+                      rep = rep_i, n_test = nrow(test_df),
+                      r = NA_real_, rmse = NA_real_))
 
-      te_ten <- make_tensors(grp_df[te_idx, ], trait)
+      te_ten <- make_tensors(test_df, trait)
       with_no_grad({
         pred_z <- model(te_ten$bands)$squeeze()$to(device = "cpu")
       })
       pred_z <- as.numeric(pred_z)
       obs_z  <- as.numeric(te_ten$y$squeeze())
 
-      # back-transform from z-score
       sc   <- trait_scale[[trait]]
       pred <- pred_z * sc$sd + sc$mean
       obs  <- obs_z  * sc$sd + sc$mean
 
       tibble(
-        group  = grp,
-        Env    = env_val,
+        held_out  = held_out,
+        Env       = env_val,
         Timepoint = tp_val,
-        rep    = rep_i,
-        n_test = length(obs),
-        r      = cor(pred, obs, use = "complete.obs"),
-        rmse   = sqrt(mean((pred - obs)^2, na.rm = TRUE))
+        rep       = rep_i,
+        n_test    = length(obs),
+        r         = cor(pred, obs, use = "complete.obs"),
+        rmse      = sqrt(mean((pred - obs)^2, na.rm = TRUE))
       )
     })
   })
@@ -416,129 +418,132 @@ within_group_cv <- function(data, trait,
 ```
 
 ```{r run-training, cache=TRUE}
-# ── Select traits with enough observations ─────────────────────────────────
+# ── Select traits with enough observations across all groups ───────────────
 min_obs <- 30
 usable_traits <- trait_cols[
   sapply(trait_cols, function(t) sum(!is.na(model_data[[t]]))) >= min_obs
 ]
-cat("Traits with >=", min_obs, "total observations:", length(usable_traits), "\n")
+cat("Traits with >=", min_obs, "observations:", length(usable_traits), "\n")
 print(usable_traits)
 
-
 ################################
-usable_traits<- usable_traits[3]
+usable_traits <- usable_traits[3]   # user selection – expand as needed
 
-
-
-
-# ── Run within-group CV for every usable trait ────────────────────────────
+# ── Run LOGO CV ────────────────────────────────────────────────────────────
 all_cv <- map_dfr(usable_traits, function(trait) {
-  cat("  trait:", trait, "\n")
-  res <- within_group_cv(model_data, trait,
-                         n_reps = 5, min_group_n = 15,
-                         epochs = 200, lr = 5e-3, batch_size = 64)
+  cat("LOGO CV – trait:", trait, "\n")
+  res       <- logo_cv(model_data, trait, n_reps = 5,
+                       epochs = 300, lr = 3e-3, batch_size = 64)
   res$trait <- trait
   res
 })
 
-cat("\nCross-validation complete. Rows:", nrow(all_cv), "\n")
+cat("\nLOGO CV complete. Rows:", nrow(all_cv), "\n")
 ```
 
 # Results: Prediction Accuracy
 
 ```{r cv-accuracy-table}
-# Summary averaged over reps then over groups
-cv_summary <- all_cv %>%
+# Average over reps for each held-out fold, then summarise across folds
+cv_fold <- all_cv %>%
   filter(!is.na(r)) %>%
-  group_by(trait, group, Env, Timepoint) %>%
+  group_by(trait, held_out, Env, Timepoint) %>%
   summarise(r    = mean(r,    na.rm = TRUE),
             rmse = mean(rmse, na.rm = TRUE),
-            .groups = "drop") %>%
+            .groups = "drop")
+
+cv_summary <- cv_fold %>%
   group_by(trait) %>%
   summarise(
     mean_r    = mean(r,    na.rm = TRUE),
     sd_r      = sd(r,     na.rm = TRUE),
     mean_rmse = mean(rmse, na.rm = TRUE),
-    n_groups  = sum(!is.na(r)),
+    n_folds   = n(),
     .groups   = "drop"
   ) %>%
   arrange(desc(mean_r))
 
 cv_summary %>%
   kable(digits = 3,
-        col.names = c("Trait","Mean r","SD r","Mean RMSE","Groups evaluated"),
-        caption = "Within-group CV: Synthetic VI prediction accuracy per trait (averaged over Timepoint × Env groups and reps)") %>%
+        col.names = c("Trait","Mean r","SD r","Mean RMSE","Folds"),
+        caption = "LOGO CV: Synthetic VI prediction accuracy (mean over 5 held-out environments, 5 training repetitions each)") %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE) %>%
   column_spec(2, bold = TRUE,
               color = ifelse(cv_summary$mean_r > 0.5, "green", "black"))
+
+cat("\nPer-fold results:\n")
+cv_fold %>%
+  arrange(trait, held_out) %>%
+  kable(digits = 3,
+        col.names = c("Trait","Held-out group","Env","Timepoint","Mean r","Mean RMSE"),
+        caption = "LOGO CV per held-out environment") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE)
 ```
 
-```{r cv-accuracy-plot, fig.height=7, fig.cap="Within-group CV accuracy: each point is one Timepoint×Env group (mean over reps)"}
-all_cv_grp <- all_cv %>%
+```{r cv-accuracy-plot, fig.height=5, fig.cap="LOGO CV: dots = individual training repetitions, bar = mean r"}
+all_cv %>%
   filter(!is.na(r)) %>%
-  group_by(trait, group, Env, Timepoint) %>%
-  summarise(r = mean(r, na.rm = TRUE), .groups = "drop")
-
-ggplot(all_cv_grp,
-       aes(y = reorder(trait, r, median, na.rm = TRUE), x
-           = r,
-           colour = Env, shape = factor(Timepoint))) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
-  geom_jitter(width = 0.18, size = 3, alpha = 0.85) +
-  stat_summary(fun = mean, geom = "crossbar", width = 0.5,
-               colour = "black", linewidth = 0.6) +
-  coord_flip() +
+  ggplot(aes(x = r, y = reorder(held_out, r, mean, na.rm = TRUE),
+             colour = Env)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_jitter(height = 0.12, size = 2.5, alpha = 0.7) +
+  stat_summary(fun = mean, geom = "crossbar", width = 0.45,
+               colour = "black", linewidth = 0.7) +
+  facet_wrap(~trait, ncol = 2) +
   scale_colour_brewer(palette = "Set2") +
-  scale_shape_manual(values = c(15,16,17,18,8,10,12,13)[seq_along(unique(all_cv_grp$Timepoint))]) +
-  labs(x = NULL, y = "Pearson r (within-group CV)",
-       title   = "Synthetic VI Prediction Accuracy per Trait",
-       colour  = "Environment",
-       shape   = "Timepoint") +
-  theme_bw(base_size = 13)
+  labs(x = "Pearson r (LOGO CV)", y = "Held-out group",
+       title  = "Synthetic VI – LOGO CV Accuracy",
+       colour = "Environment") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom")
 ```
 
-```{r cv-heatmap, fig.height=6, fig.cap="Mean r per Timepoint × Environment group and trait"}
-all_cv_grp %>%
-  ggplot(aes(x = factor(Timepoint), y = Env, fill = r)) +
-  geom_tile(colour = "white") +
-  geom_text(aes(label = round(r, 2)), size = 3) +
-  facet_wrap(~trait, ncol = 3) +
-  scale_fill_gradient2(low = "#d73027", mid = "white", high = "#1a9850",
-                       midpoint = 0, limits = c(-1, 1), na.value = "grey90") +
-  labs(x = "Timepoint", y = "Environment", fill = "r",
-       title = "Within-group CV r by Timepoint × Environment") +
-  theme_bw(base_size = 11)
+```{r cv-rep-variability, fig.height=4, fig.cap="r stability across 5 training repetitions per held-out fold"}
+all_cv %>%
+  filter(!is.na(r)) %>%
+  ggplot(aes(x = factor(rep), y = r,
+             group = held_out, colour = held_out)) +
+  geom_line(alpha = 0.8, linewidth = 0.8) +
+  geom_point(size = 2.5) +
+  facet_wrap(~trait, ncol = 2) +
+  scale_colour_brewer(palette = "Set2") +
+  labs(x = "Training repetition (seed)", y = "Pearson r",
+       colour = "Held-out group",
+       title  = "Stability of LOGO r across training seeds") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
 ```
 
-# Extract Synthetic VIs (Full-Group Models)
+# Full-Data Models and Synthetic VI Extraction
 
-For each trait and each Timepoint × Environment group we refit on all observations
-in that group and extract the Synthetic VI for every plot.
+One final model per trait is trained on **all five groups** (no held-out fold).
+These models are used to (a) extract the Synthetic VI for every observation and
+(b) derive the VI formula from the learned encoder weights.
 
 ```{r extract-synthetic-vi, cache=TRUE}
+full_models <- map(usable_traits, function(trait) {
+  cat("Training full model – trait:", trait, "\n")
+  tryCatch(
+    train_model(model_data, trait, epochs = 300, lr = 3e-3, batch_size = 64,
+                seed = 42L),
+    error = function(e) { message(e$message); NULL }
+  )
+}) %>% set_names(usable_traits)
+
 synvi_rows <- map_dfr(usable_traits, function(trait) {
-  cat("Extracting Synthetic VI for trait:", trait, "\n")
-  map_dfr(group_levels, function(grp) {
-    grp_df <- model_data %>% filter(group == grp, !is.na(.data[[trait]]))
-    if (nrow(grp_df) < 5) return(NULL)
-
-    model <- tryCatch(
-      train_model(grp_df, trait, epochs = 200, lr = 5e-3, batch_size = 64),
-      error = function(e) { message(grp, ": ", e$message); NULL }
-    )
-    if (is.null(model)) return(NULL)
-
-    bands_t <- torch_tensor(as.matrix(grp_df[, BAND_NAMES, drop = FALSE]),
-                            dtype = torch_float())
-    with_no_grad({
-      vi_vals <- model$get_synthetic_vi(bands_t)$squeeze()$to(device = "cpu")
-    })
-    grp_df %>%
-      select(Env, Timepoint, group) %>%
-      mutate(SynVI    = as.numeric(vi_vals),
-             trait    = trait)
+  model <- full_models[[trait]]
+  if (is.null(model)) return(NULL)
+  df <- model_data %>% filter(!is.na(.data[[trait]]))
+  bands_t <- torch_tensor(as.matrix(df[, BAND_NAMES, drop = FALSE]),
+                          dtype = torch_float())
+  with_no_grad({
+    vi_vals <- model$get_synthetic_vi(bands_t)$squeeze()$to(device = "cpu")
   })
+  df %>%
+    select(Env, Timepoint, group) %>%
+    mutate(SynVI = as.numeric(vi_vals), trait = trait)
 })
 
 cat("Synthetic VI extraction complete. Rows:", nrow(synvi_rows), "\n")
@@ -563,28 +568,19 @@ To interpret *which* raw bands drive each Synthetic VI we compute the gradient
 of the encoder output with respect to each band input (averaged over all samples).
 
 ```{r sensitivity-analysis, cache=TRUE}
-# Compute gradient-based band importance averaged over all groups for each trait
+# Use the full-data models for gradient-based band importance
 sensitivity_list <- map_dfr(usable_traits, function(trait) {
-  # collect gradients across all groups, then average
-  grads_all <- map(group_levels, function(grp) {
-    grp_df <- model_data %>% filter(group == grp, !is.na(.data[[trait]]))
-    if (nrow(grp_df) < 5) return(NULL)
-    model <- tryCatch(
-      train_model(grp_df, trait, epochs = 200, lr = 5e-3, batch_size = 64),
-      error = function(e) NULL
-    )
-    if (is.null(model)) return(NULL)
-    bands_t <- torch_tensor(
-      as.matrix(grp_df[, BAND_NAMES, drop = FALSE]),
-      dtype = torch_float(), requires_grad = TRUE
-    )
-    vi <- model$encoder(bands_t)
-    vi$sum()$backward()
-    as.matrix(bands_t$grad$to(device = "cpu"))   # (n_grp, n_bands)
-  })
-  grads_all <- do.call(rbind, grads_all)
-  if (is.null(grads_all) || nrow(grads_all) == 0) return(NULL)
-  abs_mean <- colMeans(abs(grads_all))
+  model <- full_models[[trait]]
+  if (is.null(model)) return(NULL)
+  df <- model_data %>% filter(!is.na(.data[[trait]]))
+  bands_t <- torch_tensor(
+    as.matrix(df[, BAND_NAMES, drop = FALSE]),
+    dtype = torch_float(), requires_grad = TRUE
+  )
+  vi <- model$encoder(bands_t)
+  vi$sum()$backward()
+  grads    <- as.matrix(bands_t$grad$to(device = "cpu"))
+  abs_mean <- colMeans(abs(grads))
   tibble(trait = trait,
          band  = BAND_NAMES,
          importance = abs_mean / sum(abs_mean))
@@ -631,33 +627,112 @@ if (!is.null(sensitivity_list) && nrow(sensitivity_list) > 0) {
 }
 ```
 
+# Synthetic VI Formula
+
+The Synthetic VI is defined by the three learned linear layers of the encoder:
+
+$$
+\mathbf{h}_1 = \text{ReLU}(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1), \quad
+\mathbf{h}_2 = \text{ReLU}(\mathbf{W}_2 \mathbf{h}_1 + \mathbf{b}_2), \quad
+\text{SynVI} = \mathbf{w}_3^\top \mathbf{h}_2 + b_3
+$$
+
+where $\mathbf{x} = [\text{blue, green, red, red\_edge, nir}]^\top$ are the
+min-max scaled band values. The tables below show the extracted weights for each
+trait's full-data model.
+
+```{r vi-formula, results="asis"}
+for (trait in usable_traits) {
+  model <- full_models[[trait]]
+  if (is.null(model)) next
+
+  cat("\n\n## Trait:", trait, "\n\n")
+
+  # ── Extract layer weights ──────────────────────────────────────────────
+  W1 <- as.matrix(model$encoder$fc1$weight$to(device="cpu")$detach())
+  b1 <- as.numeric(model$encoder$fc1$bias$to(device="cpu")$detach())
+  W2 <- as.matrix(model$encoder$fc2$weight$to(device="cpu")$detach())
+  b2 <- as.numeric(model$encoder$fc2$bias$to(device="cpu")$detach())
+  W3 <- as.numeric(model$encoder$fc3$weight$to(device="cpu")$detach())
+  b3 <- as.numeric(model$encoder$fc3$bias$to(device="cpu")$detach())
+
+  # W1: shape (16, n_bands)
+  colnames(W1) <- BAND_NAMES
+  rownames(W1) <- paste0("h1[", seq_len(nrow(W1)), "]")
+
+  cat("**Layer 1 weights** W1 (16 × n_bands) and bias b1:\n\n")
+  print(kable(round(cbind(W1, bias = b1), 4), format = "html") %>%
+        kable_styling(bootstrap_options = c("striped","condensed"),
+                      full_width = FALSE, font_size = 10))
+
+  # W2: shape (8, 16)
+  rownames(W2) <- paste0("h2[", seq_len(nrow(W2)), "]")
+  colnames(W2) <- paste0("h1[", seq_len(ncol(W2)), "]")
+
+  cat("\n\n**Layer 2 weights** W2 (8 × 16) and bias b2:\n\n")
+  print(kable(round(cbind(W2, bias = b2), 4), format = "html") %>%
+        kable_styling(bootstrap_options = c("striped","condensed"),
+                      full_width = FALSE, font_size = 10))
+
+  # W3: shape (1, 8) → output weights
+  w3_df <- tibble(node = paste0("h2[", seq_along(W3), "]"),
+                  weight = round(W3, 4))
+  cat("\n\n**Layer 3 weights** w3 (1 × 8) and bias b3 =", round(b3, 4), ":\n\n")
+  print(kable(w3_df, format = "html",
+              col.names = c("Hidden node h2","Output weight")) %>%
+        kable_styling(bootstrap_options = c("striped","condensed"),
+                      full_width = FALSE, font_size = 10))
+
+  # ── Effective linear sensitivity (first-order Taylor approx) ───────────
+  # Compute mean input, propagate through network, get gradient
+  df_trait  <- model_data %>% filter(!is.na(.data[[trait]]))
+  mean_bands <- colMeans(df_trait[, BAND_NAMES])
+  bands_t    <- torch_tensor(matrix(mean_bands, nrow = 1),
+                             dtype = torch_float(), requires_grad = TRUE)
+  vi_val <- model$encoder(bands_t)
+  vi_val$backward()
+  sens <- as.numeric(bands_t$grad$to(device="cpu"))
+  sens_df <- tibble(Band = BAND_NAMES,
+                    `dVI/dBand (at mean)` = round(sens, 4),
+                    `|Sensitivity|`       = round(abs(sens), 4)) %>%
+    arrange(desc(`|Sensitivity|`))
+
+  cat("\n\n**Linearised sensitivity** (gradient at mean band values):\n\n")
+  print(kable(sens_df, format = "html") %>%
+        kable_styling(bootstrap_options = c("striped","condensed"),
+                      full_width = FALSE))
+
+  # ── Approximate explicit formula (top 3 bands, linear approx) ──────────
+  top3 <- sens_df$Band[1:min(3, nrow(sens_df))]
+  coef_str <- paste(
+    sprintf("%+.4f × %s", sens_df$`dVI/dBand (at mean)`[match(top3, sens_df$Band)], top3),
+    collapse = " "
+  )
+  cat(sprintf(
+    "\n\n**Approximate linear formula** (linearised around band means):\n\n$$\\text{SynVI}_{%s} \\approx %.4f %s + \\text{const}$$\n\n",
+    trait, 0, coef_str
+  ))
+}
+```
+
 # Comparison: Synthetic VI vs. Standard VIs
 
-For each standard VI and trait, the same within-group 80/20 splits are used
-(same random seeds) to compute a linear-regression baseline r, so the
-comparison is directly paired.
+For each standard VI and trait the same LOGO scheme is used (train on 4 groups,
+test on 5th) with a simple linear regression baseline.
 
 ```{r standard-vi-cv}
-# Within-group linear regression benchmark for each standard VI × trait
-linreg_within_group_cv <- function(data, vi, trait,
-                                   n_reps = 5, train_frac = 0.8,
-                                   min_group_n = 15) {
-  map_dfr(group_levels, function(grp) {
-    grp_df <- data %>%
-      filter(group == grp, !is.na(.data[[vi]]), !is.na(.data[[trait]]))
-    if (nrow(grp_df) < min_group_n) return(NULL)
-
-    map_dfr(seq_len(n_reps), function(rep_i) {
-      set.seed(rep_i)  # match seeds used in DNN CV
-      tr_idx <- sample(nrow(grp_df), floor(train_frac * nrow(grp_df)))
-      te_idx <- setdiff(seq_len(nrow(grp_df)), tr_idx)
-      if (length(te_idx) < 2) return(NULL)
-      fit  <- lm(as.formula(paste(trait, "~", vi)),
-                 data = grp_df[tr_idx, ])
-      pred <- predict(fit, newdata = grp_df[te_idx, ])
-      tibble(group = grp, rep = rep_i,
-             r = cor(pred, grp_df[[trait]][te_idx], use = "complete.obs"))
-    })
+# LOGO linear regression benchmark for each standard VI × trait
+linreg_logo_cv <- function(data, vi, trait) {
+  map_dfr(group_levels, function(held_out) {
+    tr <- data %>% filter(group != held_out,
+                          !is.na(.data[[vi]]), !is.na(.data[[trait]]))
+    te <- data %>% filter(group == held_out,
+                          !is.na(.data[[vi]]), !is.na(.data[[trait]]))
+    if (nrow(tr) < 10 || nrow(te) < 2) return(NULL)
+    fit  <- lm(as.formula(paste(trait, "~", vi)), data = tr)
+    pred <- predict(fit, newdata = te)
+    tibble(held_out = held_out,
+           r = cor(pred, te[[trait]], use = "complete.obs"))
   }) %>%
   summarise(mean_r = mean(r, na.rm = TRUE)) %>%
   pull(mean_r)
@@ -668,7 +743,7 @@ if (length(vi_cols) > 0) {
       length(usable_traits), "traits ...\n")
   std_vi_results <- expand_grid(vi = vi_cols, trait = usable_traits) %>%
     mutate(mean_r = map2_dbl(vi, trait,
-                             ~linreg_within_group_cv(model_data, .x, .y)))
+                             ~linreg_logo_cv(model_data, .x, .y)))
 
   best_std_vi <- std_vi_results %>%
     group_by(trait) %>%
@@ -685,7 +760,7 @@ if (length(vi_cols) > 0) {
     arrange(desc(improvement)) %>%
     kable(digits = 3,
           col.names = c("Trait","Synthetic VI r","Best std VI","Std VI r","Δr"),
-          caption = "Synthetic VI vs. best standard VI (within-group CV mean Pearson r)") %>%
+          caption = "Synthetic VI vs. best standard VI (LOGO CV mean Pearson r)") %>%
     kable_styling(bootstrap_options = c("striped","hover","condensed"),
                   full_width = FALSE) %>%
     column_spec(5,
@@ -709,7 +784,7 @@ if (length(vi_cols) > 0 && exists("comparison")) {
     geom_line(aes(group = trait), colour = "grey60", linewidth = 0.5) +
     scale_colour_manual(values = c("Synthetic VI (DNN)"    = "#e34a33",
                                    "Best standard VI (linear)" = "#3182bd")) +
-    labs(x = "Mean within-group CV r", y = NULL,
+    labs(x = "Mean LOGO CV r", y = NULL,
          title  = "Prediction accuracy: Synthetic VI (DNN) vs. Standard VIs",
          colour = NULL, shape = NULL) +
     theme_bw(base_size = 13) +
