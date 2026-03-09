@@ -481,7 +481,8 @@ all_cv_grp <- all_cv %>%
   summarise(r = mean(r, na.rm = TRUE), .groups = "drop")
 
 ggplot(all_cv_grp,
-       aes(x = reorder(trait, r, median, na.rm = TRUE), y = r,
+       aes(y = reorder(trait, r, median, na.rm = TRUE), x
+           = r,
            colour = Env, shape = factor(Timepoint))) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
   geom_jitter(width = 0.18, size = 3, alpha = 0.85) +
@@ -600,15 +601,6 @@ if (!is.null(sensitivity_list) && nrow(sensitivity_list) > 0) {
   imp_mat <- as.matrix(imp_wide[, BAND_NAMES])
   rownames(imp_mat) <- imp_wide$trait
 
-  pheatmap_available <- requireNamespace("pheatmap", quietly = TRUE)
-  if (pheatmap_available) {
-    library(pheatmap)
-    pheatmap(imp_mat,
-             color       = colorRampPalette(c("white","#2166AC"))(50),
-             cluster_rows = TRUE, cluster_cols = FALSE,
-             main        = "Relative Band Importance for each Synthetic VI",
-             fontsize     = 10)
-  } else {
     sensitivity_list %>%
       ggplot(aes(x = band, y = reorder(trait, importance),
                  fill = importance)) +
@@ -619,7 +611,7 @@ if (!is.null(sensitivity_list) && nrow(sensitivity_list) > 0) {
            title = "Relative Band Importance for each Synthetic VI") +
       theme_bw(base_size = 11)
   }
-}
+
 ```
 
 ```{r sensitivity-barplot, fig.cap="Band importance profiles per trait"}
