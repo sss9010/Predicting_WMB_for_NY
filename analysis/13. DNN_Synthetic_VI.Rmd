@@ -24,25 +24,61 @@ knitr::opts_chunk$set(
 
 # Overview
 
-This analysis trains deep neural network (DNN) models on the five raw multispectral
-bands (blue, green, red, red_edge, nir) to discover **synthetic vegetation indices
-(Synthetic VIs)** — non-linear combinations of the five bands — that are maximally
-predictive for each agronomic and malt-quality trait.
+This script uses a deep neural network (DNN) to derive **data-driven vegetation
+indices** from raw multispectral drone imagery for the NY Winter Malting Barley
+breeding programme.
 
-Key design decisions:
+## What it does
 
-* **Bottleneck architecture**: the five-band encoder is forced through a single
-  linear neuron before the trait head. The value at that neuron *is* the
-  Synthetic VI, analogous to NDVI/NDRE but learned from data.
-* **Within-group modelling**: each unique **Timepoint × Environment** combination
-  is treated as a self-contained group. A separate model is fitted inside each
-  group, so that between-year and between-trial variation does not need to be
-  modelled explicitly — it is automatically absorbed by the group stratification.
-* **Per-trait training**: a separate model is trained for each phenotype,
-  yielding a distinct Synthetic VI optimised for that trait.
-* Accuracy is evaluated by an 80/20 random train/test split **within each
-  Timepoint × Environment group** (repeated 5 times for stability), and is
-  benchmarked against linear regression on the best standard VI over the same splits.
+Standard vegetation indices (NDVI, NDRE, etc.) are fixed, hand-crafted
+combinations of spectral bands designed for generic vegetation monitoring. Here,
+we instead **let the data determine the optimal band combination** for each
+agronomic or malt-quality trait. The result is a trait-specific **Synthetic VI**
+— a scalar value computed from the five raw bands (blue, green, red, red_edge,
+nir) that maximises predictive accuracy for that trait.
+
+A separate model is trained for each phenotype trait, yielding a distinct
+Synthetic VI per trait. After model training, the learned encoder weights are
+extracted and presented as an explicit mathematical formula so the index can be
+computed directly from band reflectances without re-running the DNN.
+
+## Modelling approach
+
+The DNN has a **bottleneck architecture** with two components:
+
+1. **Band Encoder** (5 → 16 → 8 → 1): three fully-connected layers with ReLU
+   activations compress the five bands into a single scalar — the Synthetic VI.
+   The final layer has no activation, so the index spans the full real line.
+
+2. **Prediction Head** (1 → 8 → 1): maps the Synthetic VI through one hidden
+   layer to the trait value.
+
+The bottleneck forces all spectral information through a single neuron before
+prediction, mimicking the structure of hand-crafted indices (e.g. NDVI uses a
+single derived value) while allowing non-linear, data-optimised band combinations.
+Only five specific Timepoint × Environment groups are used, one per trial year,
+representing the flight timing judged most informative per environment:
+`HELF24_TP7`, `KET21_TP4`, `MCG23_TP5`, `MCG25_TP12`, `SNY22_TP6`.
+
+## Cross-validation
+
+Model accuracy is evaluated using **Leave-One-Group-Out (LOGO)
+cross-validation**. With five groups (one per environment), this yields five
+folds:
+
+| Fold | Training environments | Validation environment |
+|------|-----------------------|------------------------|
+| 1 | KET21, MCG23, MCG25, SNY22 | HELF24 |
+| 2 | HELF24, MCG23, MCG25, SNY22 | KET21 |
+| 3 | HELF24, KET21, MCG25, SNY22 | MCG23 |
+| 4 | HELF24, KET21, MCG23, SNY22 | MCG25 |
+| 5 | HELF24, KET21, MCG23, MCG25 | SNY22 |
+
+Each fold is repeated five times with different random training seeds to quantify
+sensitivity to weight initialisation. Performance is reported as Pearson *r* and
+RMSE on the original (back-transformed) trait scale, and is benchmarked against
+the best standard VI (NDVI, NDRE, EVI, …) fitted with simple linear regression
+under the same LOGO scheme.
 
 ```{r libraries}
 # ── Core data wrangling & visualisation ────────────────────────────────────
