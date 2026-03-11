@@ -1,0 +1,2664 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+
+<meta name="author" content="workflowr" />
+
+
+<title>Population Structure and Linkage Disequilibrium Analysis</title>
+
+<script src="site_libs/header-attrs-2.30/header-attrs.js"></script>
+<script src="site_libs/jquery-3.6.0/jquery-3.6.0.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="site_libs/bootstrap-3.3.5/css/cosmo.min.css" rel="stylesheet" />
+<script src="site_libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/respond.min.js"></script>
+<style>h1 {font-size: 34px;}
+       h1.title {font-size: 38px;}
+       h2 {font-size: 30px;}
+       h3 {font-size: 24px;}
+       h4 {font-size: 18px;}
+       h5 {font-size: 16px;}
+       h6 {font-size: 12px;}
+       code {color: inherit; background-color: rgba(0, 0, 0, 0.04);}
+       pre:not([class]) { background-color: white }</style>
+<script src="site_libs/jqueryui-1.13.2/jquery-ui.min.js"></script>
+<link href="site_libs/tocify-1.9.1/jquery.tocify.css" rel="stylesheet" />
+<script src="site_libs/tocify-1.9.1/jquery.tocify.js"></script>
+<script src="site_libs/navigation-1.1/tabsets.js"></script>
+<script src="site_libs/navigation-1.1/codefolding.js"></script>
+<link href="site_libs/highlightjs-9.12.0/textmate.css" rel="stylesheet" />
+<script src="site_libs/highlightjs-9.12.0/highlight.js"></script>
+<script src="site_libs/kePrint-0.0.1/kePrint.js"></script>
+<link href="site_libs/lightable-0.0.1/lightable.css" rel="stylesheet" />
+
+<link rel="icon" href="https://github.com/workflowr/workflowr-assets/raw/main/img/reproducible.png">
+<!-- Add a small amount of space between sections. -->
+<style type="text/css">
+div.section {
+  padding-top: 12px;
+}
+</style>
+
+
+
+<style type="text/css">
+  code{white-space: pre-wrap;}
+  span.smallcaps{font-variant: small-caps;}
+  span.underline{text-decoration: underline;}
+  div.column{display: inline-block; vertical-align: top; width: 50%;}
+  div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+  ul.task-list{list-style: none;}
+    </style>
+
+<style type="text/css">code{white-space: pre;}</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+
+
+
+
+
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+img {
+  max-width:100%;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+summary {
+  display: list-item;
+}
+details > summary > p:only-child {
+  display: inline;
+}
+pre code {
+  padding: 0;
+}
+</style>
+
+
+<style type="text/css">
+.dropdown-submenu {
+  position: relative;
+}
+.dropdown-submenu>.dropdown-menu {
+  top: 0;
+  left: 100%;
+  margin-top: -6px;
+  margin-left: -1px;
+  border-radius: 0 6px 6px 6px;
+}
+.dropdown-submenu:hover>.dropdown-menu {
+  display: block;
+}
+.dropdown-submenu>a:after {
+  display: block;
+  content: " ";
+  float: right;
+  width: 0;
+  height: 0;
+  border-color: transparent;
+  border-style: solid;
+  border-width: 5px 0 5px 5px;
+  border-left-color: #cccccc;
+  margin-top: 5px;
+  margin-right: -10px;
+}
+.dropdown-submenu:hover>a:after {
+  border-left-color: #adb5bd;
+}
+.dropdown-submenu.pull-left {
+  float: none;
+}
+.dropdown-submenu.pull-left>.dropdown-menu {
+  left: -100%;
+  margin-left: 10px;
+  border-radius: 6px 0 6px 6px;
+}
+</style>
+
+<script type="text/javascript">
+// manage active state of menu based on current page
+$(document).ready(function () {
+  // active menu anchor
+  href = window.location.pathname
+  href = href.substr(href.lastIndexOf('/') + 1)
+  if (href === "")
+    href = "index.html";
+  var menuAnchor = $('a[href="' + href + '"]');
+
+  // mark the anchor link active (and if it's in a dropdown, also mark that active)
+  var dropdown = menuAnchor.closest('li.dropdown');
+  if (window.bootstrap) { // Bootstrap 4+
+    menuAnchor.addClass('active');
+    dropdown.find('> .dropdown-toggle').addClass('active');
+  } else { // Bootstrap 3
+    menuAnchor.parent().addClass('active');
+    dropdown.addClass('active');
+  }
+
+  // Navbar adjustments
+  var navHeight = $(".navbar").first().height() + 15;
+  var style = document.createElement('style');
+  var pt = "padding-top: " + navHeight + "px; ";
+  var mt = "margin-top: -" + navHeight + "px; ";
+  var css = "";
+  // offset scroll position for anchor links (for fixed navbar)
+  for (var i = 1; i <= 6; i++) {
+    css += ".section h" + i + "{ " + pt + mt + "}\n";
+  }
+  style.innerHTML = "body {" + pt + "padding-bottom: 40px; }\n" + css;
+  document.head.appendChild(style);
+});
+</script>
+
+<!-- tabsets -->
+
+<style type="text/css">
+.tabset-dropdown > .nav-tabs {
+  display: inline-table;
+  max-height: 500px;
+  min-height: 44px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs > li.active:before, .tabset-dropdown > .nav-tabs.nav-tabs-open:before {
+  content: "\e259";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li.active:before {
+  content: "\e258";
+  font-family: 'Glyphicons Halflings';
+  border: none;
+}
+
+.tabset-dropdown > .nav-tabs > li.active {
+  display: block;
+}
+
+.tabset-dropdown > .nav-tabs > li > a,
+.tabset-dropdown > .nav-tabs > li > a:focus,
+.tabset-dropdown > .nav-tabs > li > a:hover {
+  border: none;
+  display: inline-block;
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li {
+  display: block;
+  float: none;
+}
+
+.tabset-dropdown > .nav-tabs > li {
+  display: none;
+}
+</style>
+
+<!-- code folding -->
+<style type="text/css">
+.code-folding-btn { margin-bottom: 4px; }
+</style>
+
+
+
+<style type="text/css">
+
+#TOC {
+  margin: 25px 0px 20px 0px;
+}
+@media (max-width: 768px) {
+#TOC {
+  position: relative;
+  width: 100%;
+}
+}
+
+@media print {
+.toc-content {
+  /* see https://github.com/w3c/csswg-drafts/issues/4434 */
+  float: right;
+}
+}
+
+.toc-content {
+  padding-left: 30px;
+  padding-right: 40px;
+}
+
+div.main-container {
+  max-width: 1200px;
+}
+
+div.tocify {
+  width: 20%;
+  max-width: 260px;
+  max-height: 85%;
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+  div.tocify {
+    width: 25%;
+  }
+}
+
+@media (max-width: 767px) {
+  div.tocify {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+.tocify ul, .tocify li {
+  line-height: 20px;
+}
+
+.tocify-subheader .tocify-item {
+  font-size: 0.90em;
+}
+
+.tocify .list-group-item {
+  border-radius: 0px;
+}
+
+
+</style>
+
+
+
+</head>
+
+<body>
+
+
+<div class="container-fluid main-container">
+
+
+<!-- setup 3col/9col grid for toc_float and main content  -->
+<div class="row">
+<div class="col-xs-12 col-sm-4 col-md-3">
+<div id="TOC" class="tocify">
+</div>
+</div>
+
+<div class="toc-content col-xs-12 col-sm-8 col-md-9">
+
+
+
+
+<div class="navbar navbar-default  navbar-fixed-top" role="navigation">
+  <div class="container">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-bs-toggle="collapse" data-target="#navbar" data-bs-target="#navbar">
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="index.html">NY_WMB</a>
+    </div>
+    <div id="navbar" class="navbar-collapse collapse">
+      <ul class="nav navbar-nav">
+        <li>
+  <a href="index.html">Home</a>
+</li>
+<li>
+  <a href="about.html">About</a>
+</li>
+<li>
+  <a href="license.html">License</a>
+</li>
+      </ul>
+      <ul class="nav navbar-nav navbar-right">
+        
+      </ul>
+    </div><!--/.nav-collapse -->
+  </div><!--/.container -->
+</div><!--/.navbar -->
+
+<div id="header">
+
+<div class="btn-group pull-right float-right">
+<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm dropdown-toggle" data-toggle="dropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span>Code</span> <span class="caret"></span></button>
+<ul class="dropdown-menu dropdown-menu-right" style="min-width: 50px;">
+<li><a id="rmd-show-all-code" href="#">Show All Code</a></li>
+<li><a id="rmd-hide-all-code" href="#">Hide All Code</a></li>
+</ul>
+</div>
+
+
+
+<h1 class="title toc-ignore">Population Structure and Linkage
+Disequilibrium Analysis</h1>
+<h4 class="author">workflowr</h4>
+<h4 class="date">2026-03-09 21:23:01.132191</h4>
+
+</div>
+
+
+<p>
+<button type="button" class="btn btn-default btn-workflowr btn-workflowr-report" data-toggle="collapse" data-target="#workflowr-report">
+<span class="glyphicon glyphicon-list" aria-hidden="true"></span>
+workflowr <span class="glyphicon glyphicon-exclamation-sign text-danger"
+aria-hidden="true"></span>
+</button>
+</p>
+<div id="workflowr-report" class="collapse">
+<ul class="nav nav-tabs">
+<li class="active">
+<a data-toggle="tab" href="#summary">Summary</a>
+</li>
+<li>
+<a data-toggle="tab" href="#checks"> Checks <span
+class="glyphicon glyphicon-exclamation-sign text-danger"
+aria-hidden="true"></span> </a>
+</li>
+<li>
+<a data-toggle="tab" href="#versions">Past versions</a>
+</li>
+</ul>
+<div class="tab-content">
+<div id="summary" class="tab-pane fade in active">
+<p>
+<strong>Last updated:</strong> 2026-03-09
+</p>
+<p>
+<strong>Checks:</strong> <span
+class="glyphicon glyphicon-ok text-success" aria-hidden="true"></span> 5
+<span class="glyphicon glyphicon-exclamation-sign text-danger"
+aria-hidden="true"></span> 2
+</p>
+<p>
+<strong>Knit directory:</strong> <code>NY_WMBCL/</code> <span
+class="glyphicon glyphicon-question-sign" aria-hidden="true"
+title="This is the local directory in which the code in this file was executed.">
+</span>
+</p>
+<p>
+This reproducible <a href="https://rmarkdown.rstudio.com">R Markdown</a>
+analysis was created with <a
+  href="https://github.com/workflowr/workflowr">workflowr</a> (version
+1.7.2). The <em>Checks</em> tab describes the reproducibility checks
+that were applied when the results were created. The <em>Past
+versions</em> tab lists the development history.
+</p>
+<hr>
+</div>
+<div id="checks" class="tab-pane fade">
+<div id="workflowr-checks" class="panel-group">
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongRMarkdownfilestronguncommittedchanges">
+<span class="glyphicon glyphicon-exclamation-sign text-danger"
+aria-hidden="true"></span> <strong>R Markdown file:</strong> uncommitted
+changes </a>
+</p>
+</div>
+<div id="strongRMarkdownfilestronguncommittedchanges"
+class="panel-collapse collapse">
+<div class="panel-body">
+<p>The R Markdown is untracked by Git. To know which version of the R
+Markdown file created these results, you’ll want to first commit it to
+the Git repo. If you’re still working on the analysis, you can ignore
+this warning. When you’re finished, you can run
+<code>wflow_publish</code> to commit the R Markdown file and build the
+HTML.</p>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongEnvironmentstrongempty">
+<span class="glyphicon glyphicon-ok text-success"
+aria-hidden="true"></span> <strong>Environment:</strong> empty </a>
+</p>
+</div>
+<div id="strongEnvironmentstrongempty" class="panel-collapse collapse">
+<div class="panel-body">
+<p>Great job! The global environment was empty. Objects defined in the
+global environment can affect the analysis in your R Markdown file in
+unknown ways. For reproduciblity it’s best to always run the code in an
+empty environment.</p>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongSeedstrongcodesetseed20250129code">
+<span class="glyphicon glyphicon-ok text-success"
+aria-hidden="true"></span> <strong>Seed:</strong>
+<code>set.seed(20250129)</code> </a>
+</p>
+</div>
+<div id="strongSeedstrongcodesetseed20250129code"
+class="panel-collapse collapse">
+<div class="panel-body">
+<p>The command <code>set.seed(20250129)</code> was run prior to running
+the code in the R Markdown file. Setting a seed ensures that any results
+that rely on randomness, e.g. subsampling or permutations, are
+reproducible.</p>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongSessioninformationstrongrecorded">
+<span class="glyphicon glyphicon-ok text-success"
+aria-hidden="true"></span> <strong>Session information:</strong>
+recorded </a>
+</p>
+</div>
+<div id="strongSessioninformationstrongrecorded"
+class="panel-collapse collapse">
+<div class="panel-body">
+<p>Great job! Recording the operating system, R version, and package
+versions is critical for reproducibility.</p>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongCachestrongnone">
+<span class="glyphicon glyphicon-ok text-success"
+aria-hidden="true"></span> <strong>Cache:</strong> none </a>
+</p>
+</div>
+<div id="strongCachestrongnone" class="panel-collapse collapse">
+<div class="panel-body">
+<p>Nice! There were no cached chunks for this analysis, so you can be
+confident that you successfully produced the results during this
+run.</p>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongFilepathsstrongabsolute">
+<span class="glyphicon glyphicon-exclamation-sign text-danger"
+aria-hidden="true"></span> <strong>File paths:</strong> absolute </a>
+</p>
+</div>
+<div id="strongFilepathsstrongabsolute" class="panel-collapse collapse">
+<div class="panel-body">
+<p>
+Using absolute paths to the files within your workflowr project makes it
+difficult for you and others to run your code on a different machine.
+Change the absolute path(s) below to the suggested relative path(s) to
+make your code more reproducible.
+</p>
+<table class="table table-condensed table-hover">
+<thead>
+<tr>
+<th style="text-align:left;">
+absolute
+</th>
+<th style="text-align:left;">
+relative
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+C:/Users/Siim Sepp/NY_WMBCL
+</td>
+<td style="text-align:left;">
+.
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading">
+<p class="panel-title">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree1b55ea9de6ad1a932132eb55fc4dc20e00153047targetblank1b55ea9a">
+<span class="glyphicon glyphicon-ok text-success"
+aria-hidden="true"></span> <strong>Repository version:</strong>
+<a href="https://github.com/sss9010/NY_WMBCL/tree/1b55ea9de6ad1a932132eb55fc4dc20e00153047" target="_blank">1b55ea9</a>
+</a>
+</p>
+</div>
+<div
+id="strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree1b55ea9de6ad1a932132eb55fc4dc20e00153047targetblank1b55ea9a"
+class="panel-collapse collapse">
+<div class="panel-body">
+<p>
+Great! You are using Git for version control. Tracking code development
+and connecting the code version to the results is critical for
+reproducibility.
+</p>
+<p>
+The results in this page were generated with repository version
+<a href="https://github.com/sss9010/NY_WMBCL/tree/1b55ea9de6ad1a932132eb55fc4dc20e00153047" target="_blank">1b55ea9</a>.
+See the <em>Past versions</em> tab to see a history of the changes made
+to the R Markdown and HTML files.
+</p>
+<p>
+Note that you need to be careful to ensure that all relevant files for
+the analysis have been committed to Git prior to generating the results
+(you can use <code>wflow_publish</code> or
+<code>wflow_git_commit</code>). workflowr only checks the R Markdown
+file, but you know if there are other scripts or data files that it
+depends on. Below is the status of the Git repository when the results
+were generated:
+</p>
+<pre><code>
+Ignored files:
+    Ignored:    .Rproj.user/99DC6967/bibliography-index/
+    Ignored:    .Rproj.user/99DC6967/ctx/
+    Ignored:    .Rproj.user/99DC6967/explorer-cache/
+    Ignored:    .Rproj.user/99DC6967/presentation/
+    Ignored:    .Rproj.user/99DC6967/profiles-cache/
+    Ignored:    .Rproj.user/99DC6967/sources/per/
+    Ignored:    .Rproj.user/99DC6967/sources/session-aae7614c/
+    Ignored:    .Rproj.user/99DC6967/tutorial/
+    Ignored:    .Rproj.user/99DC6967/unsaved-notebooks/
+    Ignored:    .Rproj.user/99DC6967/viewer-cache/
+    Ignored:    .Rproj.user/shared/notebooks/A3DB52C4-14. Pop_Structure_LD/
+
+Untracked files:
+    Untracked:  LTT_geno_50K.csv
+    Untracked:  analysis/14. Pop_Structure_LD.Rmd
+    Untracked:  analysis/14.-Pop_Structure_LD.Rmd
+
+Unstaged changes:
+    Modified:   .Rhistory
+    Modified:   .Rproj.user/99DC6967/pcs/source-pane.pper
+    Modified:   .Rproj.user/99DC6967/pcs/workbench-pane.pper
+    Modified:   .Rproj.user/99DC6967/sources/prop/INDEX
+    Deleted:    .Rproj.user/shared/notebooks/1FB15B9F-2. Trait heritability analysis/1/99DC69671a15491c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/1FB15B9F-2. Trait heritability analysis/1/99DC69677f29e07c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/1FB15B9F-2. Trait heritability analysis/1/99DC6967b98e7b2a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/1FB15B9F-2. Trait heritability analysis/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/2011F10A-gen_corr/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/2011F10A-gen_corr/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/382AC254-11.DK_GP/1/99DC69674c7f5849/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/382AC254-11.DK_GP/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/99DC696758196df0/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/99DC696777bbbdb/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/99DC69678f1a1aa8/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/99DC6967ab39c7be/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/99DC6967c30d07a3/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/3A6F7FEB-9. MT_GP/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/468E60C9-WMBreg_processing/1/99DC6967f7a2f6c1/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/5306CF88-poster_selected/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/57F369BA-E1. Multi_spec_pre_processing/1/99DC69674ec2ddc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/57F369BA-E1. Multi_spec_pre_processing/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/598F56C8-E2.Heritability/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/66517919-gen_corr/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/66517919-gen_corr/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/6E104DCC-7. PP_ag_mq/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/6E104DCC-7. PP_ag_mq/1/99DC6967271864d0/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/6E104DCC-7. PP_ag_mq/1/99DC6967f382d448/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/6E104DCC-7. PP_ag_mq/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC6967140e2b22/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC69671a15491c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC69672937fb07/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC696737dfee52/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC69675cb8b09a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/99DC696774acd912/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/7581AF6F-1. Data_Pre_Processing/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/86A05C51-index/1/99DC69672029470d/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/86A05C51-index/1/99DC6967b6bd49ef/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/86A05C51-index/1/99DC6967c6bdb6c1/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/86A05C51-index/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8D63AFD6-E3. Trait_spatial_mod_tester/1/99DC696780948d42/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8D63AFD6-E3. Trait_spatial_mod_tester/1/99DC6967fe064521/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8D63AFD6-E3. Trait_spatial_mod_tester/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/99DC69671b617a4b/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/99DC69678f1a1aa8/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/99DC6967ab39c7be/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/99DC6967ce22fb3a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/99DC6967feafc466/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/8E8CFE8E-8. GP_ag_mq/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/A2B0DA39-3. Spectral_data_BLUE/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/A8F4DC79-13. DNN_Synthetic_VI/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC69671b617a4b/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC6967271864d0/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC6967639571b4/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC6967b98e7b2a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC6967f382d448/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/99DC6967f4784b72/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/AAFD7390-12. Prediction_plots/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/B17E0FBB-GPPP/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/B4541960-2. Trait heritability analysis_EXP/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/B4541960-2. Trait heritability analysis_EXP/1/99DC69671a15491c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/B4541960-2. Trait heritability analysis_EXP/1/99DC6967e1c0488f/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/B4541960-2. Trait heritability analysis_EXP/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C420B469-6. Phenomic kernel_build/1/99DC6967cac9066a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C420B469-6. Phenomic kernel_build/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC69675cb8b09a/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC696774acd912/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC6967874faadb/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC69678a03c100/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/99DC69679d3bb41b/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/C83436B9-5. F_PCA/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/DFC9D1A1-Problemset1/1/99DC6967b6bd49ef/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/DFC9D1A1-Problemset1/1/s/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967181ef3bc/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC69671a15491c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC696727607054/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC696765007e33/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC69677006e37/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC696774acd912/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC69677f29e07c/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC69678a03c100/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC696795d53772/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC69679d3bb41b/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967a03a391b/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967cf9017da/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967d9a066ec/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967e1c0488f/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/99DC6967f1989675/chunks.json
+    Deleted:    .Rproj.user/shared/notebooks/F62C1916-4. Exploratory_pheno_ analysis/1/s/chunks.json
+    Modified:   .Rproj.user/shared/notebooks/paths
+
+</code></pre>
+<p>
+Note that any generated files, e.g. HTML, png, CSS, etc., are not
+included in this status report because it is ok for generated content to
+have uncommitted changes.
+</p>
+</div>
+</div>
+</div>
+</div>
+<hr>
+</div>
+<div id="versions" class="tab-pane fade">
+<p>
+There are no past versions. Publish this analysis with
+<code>wflow_publish()</code> to start tracking its development.
+</p>
+<hr>
+</div>
+</div>
+</div>
+<div id="overview" class="section level1" number="1">
+<h1><span class="header-section-number">1</span> Overview</h1>
+<p>This script characterises the <strong>population structure</strong>
+and <strong>linkage disequilibrium (LD)</strong> of the NY Winter
+Malting Barley (NY_WMB) marker data. The genotype input is:</p>
+<table>
+<colgroup>
+<col width="22%" />
+<col width="29%" />
+<col width="48%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>Format</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>LTT_geno_50K.csv</code></td>
+<td>Semicolon-delimited, markers × individuals</td>
+<td>AA / AB / BB calls, converted to 0 / 1 / 2 additive coding</td>
+</tr>
+</tbody>
+</table>
+<p>SNP chromosome and physical position information is sourced from the
+Morex V3 assembly annotation.</p>
+<p><strong>Population structure</strong> is explored via:</p>
+<ul>
+<li>Principal Component Analysis (PCA) on the centred marker matrix</li>
+<li>Discriminant Analysis of Principal Components (DAPC)</li>
+<li>Genomic kinship heatmap</li>
+</ul>
+<p><strong>Linkage disequilibrium</strong> is characterised via:</p>
+<ul>
+<li>Genome-wide and per-chromosome LD decay (r² vs physical
+distance)</li>
+<li>Per-chromosome LD heatmaps on a marker subsample</li>
+<li>Estimation of the distance at which r² drops to half its maximum (LD
+half-life)</li>
+</ul>
+<pre class="r"><code>library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(RSpectra)       # fast truncated SVD/eigen for large matrices
+library(factoextra)     # PCA visualisation helpers
+library(corrplot)
+library(knitr)
+library(kableExtra)
+library(readxl)
+
+# Population genetics
+if (requireNamespace(&quot;adegenet&quot;, quietly = TRUE)) library(adegenet)
+
+# LD heatmap (optional — install with: install.packages(&quot;LDheatmap&quot;))
+ld_heatmap_avail &lt;- requireNamespace(&quot;LDheatmap&quot;, quietly = TRUE)
+
+set.seed(42)</code></pre>
+</div>
+<div id="data-loading" class="section level1" number="2">
+<h1><span class="header-section-number">2</span> Data Loading</h1>
+<pre class="r"><code># ── Resolve project root ───────────────────────────────────────────────────
+proj_roots &lt;- c(
+  &quot;C:/Users/Siim Sepp/NY_WMBCL&quot;,
+  &quot;C:/Users/Siim Sepp/NY_WMBCL&quot;,
+  &quot;~/Documents/GitHub/NY_WMBCL&quot;
+)
+proj_root &lt;- proj_roots[dir.exists(proj_roots)][1]
+message(&quot;Project root: &quot;, proj_root)
+
+# ── Read LTT_geno_50K.csv ─────────────────────────────────────────────────
+# Format: semicolon-delimited, markers as rows, individuals as columns.
+# First column = marker_name; genotypes coded as AA / AB / BB.
+geno_file &lt;- file.path(proj_root, &quot;LTT_geno_50K.csv&quot;)
+if (!file.exists(geno_file)) stop(&quot;LTT_geno_50K.csv not found at: &quot;, geno_file)
+
+raw &lt;- read.csv(geno_file, sep = &quot;;&quot;, header = TRUE,
+                check.names = FALSE, stringsAsFactors = FALSE)
+
+marker_names &lt;- raw[[1]]          # first column = marker IDs
+ind_names    &lt;- colnames(raw)[-1] # remaining columns = individual IDs
+geno_char    &lt;- as.matrix(raw[, -1])   # markers × individuals (character)
+rownames(geno_char) &lt;- marker_names
+
+# ── Convert AA / AB / BB → 0 / 1 / 2 (additive coding) ──────────────────
+# AA = homozygous reference → 0
+# AB / BA = heterozygous   → 1
+# BB = homozygous alternate → 2
+# anything else (e.g. &quot;--&quot;, &quot;NC&quot;, &quot;&quot;) → NA
+aabb_to_012 &lt;- function(x) {
+  x &lt;- trimws(toupper(x))
+  out &lt;- rep(NA_real_, length(x))
+  out[x == &quot;AA&quot;]              &lt;- 0
+  out[x %in% c(&quot;AB&quot;, &quot;BA&quot;)] &lt;- 1
+  out[x == &quot;BB&quot;]              &lt;- 2
+  out
+}
+
+geno_012 &lt;- apply(geno_char, 2, aabb_to_012)   # still markers × individuals
+rownames(geno_012) &lt;- marker_names
+colnames(geno_012) &lt;- ind_names
+
+# Transpose to individuals × markers (standard orientation)
+geno_a &lt;- t(geno_012)    # additive 0/1/2 matrix
+
+n_ind &lt;- nrow(geno_a)
+n_snp &lt;- ncol(geno_a)
+cat(sprintf(&quot;Individuals : %d\n&quot;, n_ind))</code></pre>
+<pre><code>Individuals : 662</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Markers     : %d\n&quot;, n_snp))</code></pre>
+<pre><code>Markers     : 39025</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Missing (%%) : %.2f%%\n&quot;, mean(is.na(geno_a)) * 100))</code></pre>
+<pre><code>Missing (%) : 0.96%</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Genotype counts — AA: %d  AB: %d  BB: %d  NA: %d\n&quot;,
+            sum(geno_012 == 0, na.rm = TRUE),
+            sum(geno_012 == 1, na.rm = TRUE),
+            sum(geno_012 == 2, na.rm = TRUE),
+            sum(is.na(geno_012))))</code></pre>
+<pre><code>Genotype counts — AA: 11683339  AB: 662571  BB: 13241813  NA: 246827</code></pre>
+<pre class="r"><code># ── SNP chromosome / position map ─────────────────────────────────────────
+map_paths &lt;- c(
+  file.path(proj_root, &quot;data/geno/SNPPositions_50k_on_MorexV3.xlsx&quot;),
+  file.path(proj_root, &quot;data/SNPPositions_50k_on_MorexV3.xlsx&quot;)
+)
+map_file &lt;- map_paths[file.exists(map_paths)][1]
+
+if (!is.na(map_file)) {
+  snp_map &lt;- read_xlsx(map_file)
+  # Standardise column names regardless of exact header text
+  names(snp_map) &lt;- tolower(names(snp_map))
+  snp_map$chr &lt;- gsub(&quot;H&quot;, &quot;&quot;, snp_map$`refseq name`)
+  snp_map$chr &lt;- gsub(&quot;chr&quot;, &quot;&quot;, snp_map$chr)
+  # Detect rs/marker, chrom, pos columns
+  marker_col &lt;- colnames(snp_map)[1]
+  chr_col    &lt;- grep(&quot;chr|chrom&quot;,          names(snp_map), value = TRUE)[1]
+  pos_col    &lt;- colnames(snp_map)[3]
+  snp_map &lt;- snp_map %&gt;%
+    rename(Marker = all_of(marker_col),
+           Chr    = all_of(chr_col),
+           Pos    = all_of(pos_col)) %&gt;%
+    mutate(Chr = as.character(Chr),
+           Pos = as.numeric(Pos)) %&gt;%
+    filter(Marker %in% colnames(geno_a),
+           !Chr %in% c(&quot;0&quot;,&quot;Un&quot;,&quot;NA&quot;,NA))   # drop unplaced markers
+  cat(&quot;Markers with map position:&quot;, nrow(snp_map),
+      &quot;on&quot;, n_distinct(snp_map$Chr), &quot;chromosomes\n&quot;)
+} else {
+  warning(&quot;SNP position file not found — LD decay will use marker index order only.&quot;)
+  snp_map &lt;- tibble(
+    Marker = colnames(geno_a),
+    Chr    = &quot;unknown&quot;,
+    Pos    = seq_len(ncol(geno_a))
+  )
+}</code></pre>
+<pre><code>Markers with map position: 38165 on 7 chromosomes</code></pre>
+</div>
+<div id="data-quality-summary" class="section level1" number="3">
+<h1><span class="header-section-number">3</span> Data Quality
+Summary</h1>
+<pre class="r"><code># ── Per-marker MAF and missing rate ───────────────────────────────────────
+maf_vec &lt;- apply(geno_a, 2, function(x) {
+  p &lt;- mean(x, na.rm = TRUE) / 2      # freq of alt allele (0/1/2 coding)
+  min(p, 1 - p)
+})
+miss_vec &lt;- colMeans(is.na(geno_a))
+
+qc_df &lt;- tibble(MAF = maf_vec, Missing = miss_vec)
+
+p_maf  &lt;- ggplot(qc_df, aes(MAF)) +
+  geom_histogram(bins = 50, fill = &quot;#3182bd&quot;, colour = &quot;white&quot;) +
+  labs(title = &quot;Minor Allele Frequency distribution&quot;,
+       x = &quot;MAF&quot;, y = &quot;Count&quot;) +
+  theme_bw(base_size = 13)
+
+p_miss &lt;- ggplot(qc_df, aes(Missing)) +
+  geom_histogram(bins = 50, fill = &quot;#e34a33&quot;, colour = &quot;white&quot;) +
+  labs(title = &quot;Per-marker missing rate&quot;,
+       x = &quot;Missing proportion&quot;, y = &quot;Count&quot;) +
+  theme_bw(base_size = 13)
+
+p_maf + p_miss</code></pre>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/qc-summary-1.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code>tibble(
+  Statistic = c(&quot;Individuals&quot;,&quot;Markers&quot;,&quot;Mean MAF&quot;,&quot;Markers MAF &lt; 0.05&quot;,
+                &quot;Mean missing rate&quot;,&quot;Markers &gt; 10% missing&quot;),
+  Value = c(n_ind, n_snp,
+            round(mean(maf_vec, na.rm = TRUE), 3),
+            sum(maf_vec &lt; 0.05, na.rm = TRUE),
+            round(mean(miss_vec), 4),
+            sum(miss_vec &gt; 0.10))
+) %&gt;%
+  kable(caption = &quot;Genotype data summary&quot;) %&gt;%
+  kable_styling(bootstrap_options = c(&quot;striped&quot;,&quot;hover&quot;,&quot;condensed&quot;),
+                full_width = FALSE)</code></pre>
+<table class="table table-striped table-hover table-condensed" style="color: black; width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Genotype data summary
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Statistic
+</th>
+<th style="text-align:right;">
+Value
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+Individuals
+</td>
+<td style="text-align:right;">
+662.0000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Markers
+</td>
+<td style="text-align:right;">
+39025.0000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Mean MAF
+</td>
+<td style="text-align:right;">
+0.2090
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Markers MAF &lt; 0.05
+</td>
+<td style="text-align:right;">
+9301.0000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Mean missing rate
+</td>
+<td style="text-align:right;">
+0.0096
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Markers &gt; 10% missing
+</td>
+<td style="text-align:right;">
+1151.0000
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>if (any(snp_map$Chr != &quot;unknown&quot;)) {
+  snp_map %&gt;%
+    mutate(Pos_Mb = Pos / 1e6) %&gt;%
+    ggplot(aes(x = Pos_Mb)) +
+    geom_histogram(bins = 100, fill = &quot;#2ca25f&quot;, colour = &quot;blue&quot;) +
+    facet_wrap(~Chr, ncol = 4, scales = &quot;free_x&quot;) +
+    labs(x = &quot;Physical position (Mb)&quot;, y = &quot;SNP count&quot;,
+         title = &quot;SNP density per chromosome&quot;) +
+    theme_bw(base_size = 11)
+}</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/marker-density-1.png" alt="SNP density across the barley genome (Morex V3)" width="960" />
+<p class="caption">
+SNP density across the barley genome (Morex V3)
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+</div>
+<div id="population-structure" class="section level1" number="4">
+<h1><span class="header-section-number">4</span> Population
+Structure</h1>
+<div id="pca" class="section level2" number="4.1">
+<h2><span class="header-section-number">4.1</span> PCA</h2>
+<pre class="r"><code># ── Impute missing values with column mean before PCA ─────────────────────
+geno_imp &lt;- geno_a
+col_means &lt;- colMeans(geno_a, na.rm = TRUE)
+for (j in seq_len(ncol(geno_imp))) {
+  nas &lt;- is.na(geno_imp[, j])
+  if (any(nas)) geno_imp[nas, j] &lt;- col_means[j]
+}
+
+# ── Centre markers (subtract column mean) ─────────────────────────────────
+geno_ctr &lt;- scale(geno_imp, center = TRUE, scale = FALSE)
+
+# ── Truncated SVD via RSpectra (fast for large matrices) ──────────────────
+n_pc &lt;- min(20, n_ind - 1)
+svd_res &lt;- RSpectra::svds(geno_ctr, k = n_pc)
+
+# PC scores (n_ind × n_pc)
+pc_scores &lt;- svd_res$u %*% diag(svd_res$d)
+rownames(pc_scores) &lt;- rownames(geno_a)
+colnames(pc_scores) &lt;- paste0(&quot;PC&quot;, seq_len(n_pc))
+
+# Variance explained
+var_exp &lt;- svd_res$d^2 / sum(svd_res$d^2) * 100
+
+cat(&quot;Variance explained by PC1–5:\n&quot;)</code></pre>
+<pre><code>Variance explained by PC1–5:</code></pre>
+<pre class="r"><code>print(round(var_exp[1:5], 2))</code></pre>
+<pre><code>[1] 10.32  9.21  8.68  7.17  6.31</code></pre>
+<div class="alert alert-warning">
+<p>
+<strong>Warning:</strong> The above code chunk cached its results, but
+it won’t be re-run if previous chunks it depends on are updated. If you
+need to use caching, it is highly recommended to also set
+<code>knitr::opts_chunk$set(autodep = TRUE)</code> at the top of the
+file (in a chunk that is not cached). Alternatively, you can customize
+the option <code>dependson</code> for each individual chunk that is
+cached. Using either <code>autodep</code> or <code>dependson</code> will
+remove this warning. See the
+<a href="https://yihui.name/knitr/options/#cache"
+>knitr cache options</a> for more details.
+</p>
+</div>
+<pre class="r"><code>tibble(PC = seq_len(n_pc), VarExp = var_exp) %&gt;%
+  ggplot(aes(x = PC, y = VarExp)) +
+  geom_col(fill = &quot;#3182bd&quot;) +
+  geom_line(aes(group = 1), colour = &quot;black&quot;) +
+  geom_point(size = 2) +
+  labs(x = &quot;Principal Component&quot;, y = &quot;Variance explained (%)&quot;,
+       title = &quot;Scree plot&quot;) +
+  theme_bw(base_size = 13)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/pca-scree-1.png" alt="Scree plot — variance explained by each PC" width="960" />
+<p class="caption">
+Scree plot — variance explained by each PC
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code>pc_df &lt;- as_tibble(pc_scores[, 1:min(6, n_pc)]) %&gt;%
+  mutate(ID = rownames(pc_scores))
+
+# Attempt to join population labels if available
+pop_file &lt;- file.path(proj_root, &quot;data/geno/wmb_pedigree.Rdata&quot;)
+if (file.exists(pop_file)) {
+  load(pop_file)
+  ped_obj &lt;- ls()[sapply(ls(), function(x) is.data.frame(get(x)) &amp;&amp;
+                           any(grepl(&quot;GID|id|pop|fam&quot;, names(get(x)), ignore.case=TRUE)))]
+  if (length(ped_obj) &gt; 0) {
+    ped &lt;- get(ped_obj[1])
+    id_col  &lt;- grep(&quot;GID|id&quot;,  names(ped), ignore.case=TRUE, value=TRUE)[1]
+    pop_col &lt;- grep(&quot;pop|fam|type|group&quot;, names(ped), ignore.case=TRUE, value=TRUE)[1]
+    if (!is.na(id_col) &amp;&amp; !is.na(pop_col)) {
+      pc_df &lt;- pc_df %&gt;%
+        left_join(ped %&gt;% select(ID = all_of(id_col),
+                                 Population = all_of(pop_col)), by = &quot;ID&quot;)
+    }
+  }
+}
+if (!&quot;Population&quot; %in% names(pc_df)) pc_df$Population &lt;- &quot;All&quot;
+
+colour_scale &lt;- if (n_distinct(pc_df$Population) &lt;= 9) {
+  scale_colour_brewer(palette = &quot;Set1&quot;)
+} else {
+  scale_colour_viridis_d()
+}
+
+p12 &lt;- ggplot(pc_df, aes(PC1, PC2, colour = Population)) +
+  geom_point(alpha = 0.7, size = 2) + colour_scale +
+  labs(x = sprintf(&quot;PC1 (%.1f%%)&quot;, var_exp[1]),
+       y = sprintf(&quot;PC2 (%.1f%%)&quot;, var_exp[2])) +
+  theme_bw(base_size = 12) + theme(legend.position = &quot;right&quot;)
+
+p13 &lt;- ggplot(pc_df, aes(PC1, PC3, colour = Population)) +
+  geom_point(alpha = 0.7, size = 2) + colour_scale +
+  labs(x = sprintf(&quot;PC1 (%.1f%%)&quot;, var_exp[1]),
+       y = sprintf(&quot;PC3 (%.1f%%)&quot;, var_exp[3])) +
+  theme_bw(base_size = 12) + theme(legend.position = &quot;none&quot;)
+
+p23 &lt;- ggplot(pc_df, aes(PC2, PC3, colour = Population)) +
+  geom_point(alpha = 0.7, size = 2) + colour_scale +
+  labs(x = sprintf(&quot;PC2 (%.1f%%)&quot;, var_exp[2]),
+       y = sprintf(&quot;PC3 (%.1f%%)&quot;, var_exp[3])) +
+  theme_bw(base_size = 12) + theme(legend.position = &quot;none&quot;)
+
+p14 &lt;- ggplot(pc_df, aes(PC1, PC4, colour = Population)) +
+  geom_point(alpha = 0.7, size = 2) + colour_scale +
+  labs(x = sprintf(&quot;PC1 (%.1f%%)&quot;, var_exp[1]),
+       y = sprintf(&quot;PC4 (%.1f%%)&quot;, var_exp[4])) +
+  theme_bw(base_size = 12) + theme(legend.position = &quot;none&quot;)
+
+(p12 + p13) / (p23 + p14) +
+  plot_layout(guides = &quot;collect&quot;) &amp;
+  theme(legend.position = &quot;right&quot;)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/pca-scatter-1.png" alt="PCA scatter plots — PC1–4" width="960" />
+<p class="caption">
+PCA scatter plots — PC1–4
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code>tibble(PC = seq_len(n_pc), CumVar = cumsum(var_exp)) %&gt;%
+  ggplot(aes(PC, CumVar)) +
+  geom_line() + geom_point(size = 2) +
+  geom_hline(yintercept = c(50, 80), linetype = &quot;dashed&quot;, colour = c(&quot;orange&quot;,&quot;red&quot;)) +
+  annotate(&quot;text&quot;, x = n_pc * 0.8, y = 52, label = &quot;50%&quot;, colour = &quot;orange&quot;) +
+  annotate(&quot;text&quot;, x = n_pc * 0.8, y = 82, label = &quot;80%&quot;, colour = &quot;red&quot;) +
+  labs(x = &quot;Number of PCs&quot;, y = &quot;Cumulative variance explained (%)&quot;,
+       title = &quot;Cumulative variance explained by PCs&quot;) +
+  theme_bw(base_size = 13)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/pca-cumvar-1.png" alt="Cumulative variance explained" width="960" />
+<p class="caption">
+Cumulative variance explained
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+</div>
+<div id="discriminant-analysis-of-principal-components-dapc"
+class="section level2" number="4.2">
+<h2><span class="header-section-number">4.2</span> Discriminant Analysis
+of Principal Components (DAPC)</h2>
+<p>DAPC (Jombart et al. 2010) finds the linear combination of PCs that
+best discriminates pre-defined or inferred groups. We use k-means
+clustering on the PC scores to infer K groups, then run DAPC.</p>
+<pre class="r"><code>if (requireNamespace(&quot;adegenet&quot;, quietly = TRUE)) {
+
+  # ── Choose number of clusters via BIC on k-means ──────────────────────
+  max_k  &lt;- min(10, floor(n_ind / 10))
+  bic_k  &lt;- map_dbl(2:max_k, function(k) {
+    km &lt;- kmeans(pc_scores[, 1:min(10, n_pc)], centers = k,
+                 nstart = 10, iter.max = 50)
+    km$tot.withinss   # use within-SS as proxy (BIC not directly from kmeans)
+  })
+
+  # Elbow method: rate of change of within-SS
+  k_opt &lt;- which.min(diff(bic_k)) + 2   # +2 because we start from k=2
+  cat(&quot;Optimal K (elbow method):&quot;, k_opt, &quot;\n&quot;)
+
+  p_bic &lt;- tibble(K = 2:max_k, WithinSS = bic_k) %&gt;%
+    ggplot(aes(K, WithinSS)) +
+    geom_line() + geom_point(size = 2) +
+    geom_vline(xintercept = k_opt, linetype = &quot;dashed&quot;, colour = &quot;red&quot;) +
+    labs(x = &quot;Number of clusters (K)&quot;, y = &quot;Total within-cluster SS&quot;,
+         title = sprintf(&quot;K-means elbow plot (selected K = %d)&quot;, k_opt)) +
+    theme_bw(base_size = 13)
+  print(p_bic)
+
+  # ── K-means with optimal K ─────────────────────────────────────────────
+  km_fit  &lt;- kmeans(pc_scores[, 1:min(10, n_pc)], centers = k_opt,
+                    nstart = 25, iter.max = 100)
+  pop_vec &lt;- as.factor(km_fit$cluster)
+
+  # ── DAPC ──────────────────────────────────────────────────────────────
+  # Convert to genind-free numeric DAPC using adegenet&#39;s low-level interface
+  n_da  &lt;- k_opt - 1
+  n_pca &lt;- min(50, n_ind - 1)
+  dapc_res &lt;- adegenet::dapc(geno_imp, grp = pop_vec,
+                              n.pca = n_pca, n.da = n_da)
+
+  # ── Membership probability bar chart ──────────────────────────────────
+  memb &lt;- as_tibble(dapc_res$posterior) %&gt;%
+    mutate(ID = rownames(geno_a), Cluster = as.character(km_fit$cluster)) %&gt;%
+    arrange(Cluster) %&gt;%
+    mutate(Order = row_number()) %&gt;%
+    pivot_longer(starts_with(&quot;V&quot;) | matches(&quot;^[0-9]+$&quot;),
+                 names_to = &quot;Ancestry&quot;, values_to = &quot;Prob&quot;)
+
+  p_memb &lt;- ggplot(memb, aes(x = Order, y = Prob, fill = Ancestry)) +
+    geom_col(width = 1) +
+    scale_fill_brewer(palette = &quot;Set2&quot;) +
+    labs(x = &quot;Individual (sorted by cluster)&quot;, y = &quot;Membership probability&quot;,
+         title = &quot;DAPC – cluster membership probabilities&quot;) +
+    theme_bw(base_size = 12) +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+  print(p_memb)
+
+  # ── DAPC scatter (DA1 vs DA2 if ≥2 DAs) ──────────────────────────────
+  da_df &lt;- as_tibble(dapc_res$ind.coord) %&gt;%
+    mutate(Cluster = as.factor(km_fit$cluster))
+  if (ncol(dapc_res$ind.coord) &gt;= 2) {
+    p_da &lt;- ggplot(da_df, aes(.data[[names(da_df)[1]]],
+                               .data[[names(da_df)[2]]],
+                               colour = Cluster)) +
+      geom_point(alpha = 0.7, size = 2) +
+      scale_colour_brewer(palette = &quot;Set1&quot;) +
+      labs(x = &quot;DA1&quot;, y = &quot;DA2&quot;,
+           title = &quot;DAPC scatter plot&quot;) +
+      theme_bw(base_size = 13)
+    print(p_da)
+  }
+
+} else {
+  cat(&quot;Package &#39;adegenet&#39; not available. Install with: install.packages(&#39;adegenet&#39;)\n&quot;)
+}</code></pre>
+<pre><code>Optimal K (elbow method): 3 </code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/dapc-1.png" alt="DAPC — discriminant components coloured by inferred cluster" width="960" />
+<p class="caption">
+DAPC — discriminant components coloured by inferred cluster
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/dapc-2.png" alt="DAPC — discriminant components coloured by inferred cluster" width="960" />
+<p class="caption">
+DAPC — discriminant components coloured by inferred cluster
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/dapc-3.png" alt="DAPC — discriminant components coloured by inferred cluster" width="960" />
+<p class="caption">
+DAPC — discriminant components coloured by inferred cluster
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<div class="alert alert-warning">
+<p>
+<strong>Warning:</strong> The above code chunk cached its results, but
+it won’t be re-run if previous chunks it depends on are updated. If you
+need to use caching, it is highly recommended to also set
+<code>knitr::opts_chunk$set(autodep = TRUE)</code> at the top of the
+file (in a chunk that is not cached). Alternatively, you can customize
+the option <code>dependson</code> for each individual chunk that is
+cached. Using either <code>autodep</code> or <code>dependson</code> will
+remove this warning. See the
+<a href="https://yihui.name/knitr/options/#cache"
+>knitr cache options</a> for more details.
+</p>
+</div>
+</div>
+<div id="genomic-kinship-heatmap" class="section level2" number="4.3">
+<h2><span class="header-section-number">4.3</span> Genomic Kinship
+Heatmap</h2>
+<pre class="r"><code># Compute kinship matrix from centred markers
+# K = Z Z&#39; / (2 Σ p_j(1-p_j))
+p_j    &lt;- colMeans(geno_imp, na.rm = TRUE) / 2   # allele freq
+denom  &lt;- 2 * sum(p_j * (1 - p_j))
+Z      &lt;- sweep(geno_imp, 2, 2 * p_j, &quot;-&quot;)       # centre by 2p
+K_mat  &lt;- tcrossprod(Z) / denom                   # n_ind × n_ind
+
+# Sort individuals by PC1 for better visual structure
+pc1_order &lt;- order(pc_scores[, 1])
+K_sorted  &lt;- K_mat[pc1_order, pc1_order]
+
+# Subsample if &gt; 200 individuals for display
+max_disp &lt;- 200
+if (nrow(K_sorted) &gt; max_disp) {
+  idx      &lt;- round(seq(1, nrow(K_sorted), length.out = max_disp))
+  K_sorted &lt;- K_sorted[idx, idx]
+  cat(&quot;Note: kinship heatmap shows&quot;, max_disp, &quot;individuals (subsampled).\n&quot;)
+}</code></pre>
+<pre><code>Note: kinship heatmap shows 200 individuals (subsampled).</code></pre>
+<pre class="r"><code>K_cor &lt;- cov2cor(K_sorted)
+
+corrplot(K_cor,
+         tl.pos = &quot;n&quot;,
+         cl.cex = 0.8,
+         title  = &quot;Genomic kinship (sorted by PC1)&quot;,
+         mar    = c(0, 0, 2, 0))</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/kinship-heatmap-1.png" alt="Genomic kinship matrix (VanRaden method) — individuals sorted by PC1" width="960" />
+<p class="caption">
+Genomic kinship matrix (VanRaden method) — individuals sorted by PC1
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code>hist(K_sorted[,1])</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/kinship-heatmap-2.png" alt="Genomic kinship matrix (VanRaden method) — individuals sorted by PC1" width="960" />
+<p class="caption">
+Genomic kinship matrix (VanRaden method) — individuals sorted by PC1
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code># Diagonal (self-kinship) summary
+cat(sprintf(&quot;\nKinship diagonal (self-kinship): mean = %.3f, range [%.3f, %.3f]\n&quot;,
+            mean(diag(K_mat)), min(diag(K_mat)), max(diag(K_mat))))</code></pre>
+<pre><code>
+Kinship diagonal (self-kinship): mean = 1.892, range [1.092, 2.845]</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Off-diagonal kinship           : mean = %.3f, range [%.3f, %.3f]\n&quot;,
+            mean(K_mat[lower.tri(K_mat)]),
+            min(K_mat[lower.tri(K_mat)]),
+            max(K_mat[lower.tri(K_mat)])))</code></pre>
+<pre><code>Off-diagonal kinship           : mean = -0.003, range [-0.599, 2.056]</code></pre>
+</div>
+</div>
+<div id="linkage-disequilibrium" class="section level1" number="5">
+<h1><span class="header-section-number">5</span> Linkage
+Disequilibrium</h1>
+<div id="ld-computation" class="section level2" number="5.1">
+<h2><span class="header-section-number">5.1</span> LD Computation</h2>
+<pre class="r"><code># ── Restrict to mapped markers only ───────────────────────────────────────
+mapped_markers &lt;- intersect(colnames(geno_a), snp_map$Marker)
+cat(&quot;Mapped markers available for LD:&quot;, length(mapped_markers), &quot;\n&quot;)</code></pre>
+<pre><code>Mapped markers available for LD: 38165 </code></pre>
+<pre class="r"><code>geno_mapped &lt;- geno_imp[, mapped_markers, drop = FALSE]
+map_sub     &lt;- snp_map %&gt;%
+  filter(Marker %in% mapped_markers) %&gt;%
+  arrange(Chr, Pos)
+
+chromosomes &lt;- sort(unique(map_sub$Chr))
+cat(&quot;Chromosomes:&quot;, paste(chromosomes, collapse = &quot;, &quot;), &quot;\n&quot;)</code></pre>
+<pre><code>Chromosomes: 1, 2, 3, 4, 5, 6, 7 </code></pre>
+<pre class="r"><code># ── Fast r² function for two marker vectors ────────────────────────────────
+r2_pair &lt;- function(x, y) {
+  ok   &lt;- complete.cases(x, y)
+  if (sum(ok) &lt; 10) return(NA_real_)
+  x &lt;- x[ok]; y &lt;- y[ok]
+  # r² via correlation of allele counts
+  cor(x, y)^2
+}
+
+# ── Sample pairs within a distance window and compute r² ──────────────────
+compute_ld_decay &lt;- function(chrom, n_pairs = 5000, max_dist_mb = 300) {
+  chr_map  &lt;- map_sub %&gt;% filter(Chr == chrom) %&gt;% arrange(Pos)
+  if (nrow(chr_map) &lt; 10) return(NULL)
+  markers  &lt;- chr_map$Marker
+  G_chr    &lt;- geno_mapped[, markers, drop = FALSE]
+  n_m      &lt;- length(markers)
+
+  # Random pairs sampling
+  n_sample &lt;- min(n_pairs, n_m * (n_m - 1) / 2)
+  pairs    &lt;- matrix(sample.int(n_m, 2 * n_sample, replace = TRUE),
+                     ncol = 2)
+  pairs    &lt;- pairs[pairs[,1] != pairs[,2], , drop = FALSE]
+  pairs    &lt;- pairs[1:min(n_sample, nrow(pairs)), , drop = FALSE]
+
+  map_dfr(seq_len(nrow(pairs)), function(k) {
+    i &lt;- pairs[k, 1]; j &lt;- pairs[k, 2]
+    dist_mb &lt;- abs(chr_map$Pos[i] - chr_map$Pos[j]) / 1e6
+    if (dist_mb &gt; max_dist_mb) return(NULL)
+    r2 &lt;- r2_pair(G_chr[, i], G_chr[, j])
+    tibble(Chr = chrom, dist_mb = dist_mb, r2 = r2)
+  })
+}</code></pre>
+<pre class="r"><code>cat(&quot;Computing LD decay per chromosome ...\n&quot;)</code></pre>
+<pre><code>Computing LD decay per chromosome ...</code></pre>
+<pre class="r"><code>ld_decay &lt;- map_dfr(chromosomes, function(chr) {
+  cat(&quot; Chr&quot;, chr, &quot;\n&quot;)
+  compute_ld_decay(chr, n_pairs = 5000)
+})</code></pre>
+<pre><code> Chr 1 </code></pre>
+<pre><code> Chr 2 </code></pre>
+<pre><code> Chr 3 </code></pre>
+<pre><code> Chr 4 </code></pre>
+<pre><code> Chr 5 </code></pre>
+<pre><code> Chr 6 </code></pre>
+<pre><code> Chr 7 </code></pre>
+<pre class="r"><code>cat(&quot;Total SNP pairs computed:&quot;, nrow(ld_decay), &quot;\n&quot;)</code></pre>
+<pre><code>Total SNP pairs computed: 20187 </code></pre>
+<div class="alert alert-warning">
+<p>
+<strong>Warning:</strong> The above code chunk cached its results, but
+it won’t be re-run if previous chunks it depends on are updated. If you
+need to use caching, it is highly recommended to also set
+<code>knitr::opts_chunk$set(autodep = TRUE)</code> at the top of the
+file (in a chunk that is not cached). Alternatively, you can customize
+the option <code>dependson</code> for each individual chunk that is
+cached. Using either <code>autodep</code> or <code>dependson</code> will
+remove this warning. See the
+<a href="https://yihui.name/knitr/options/#cache"
+>knitr cache options</a> for more details.
+</p>
+</div>
+</div>
+<div id="genome-wide-ld-decay" class="section level2" number="5.2">
+<h2><span class="header-section-number">5.2</span> Genome-wide LD
+Decay</h2>
+<pre class="r"><code>ld_decay %&gt;%
+  filter(!is.na(r2)) %&gt;%
+  ggplot(aes(x = dist_mb, y = r2)) +
+  geom_point(alpha = 0.05, size = 0.6, colour = &quot;grey40&quot;) +
+  geom_smooth(method = &quot;loess&quot;, span = 0.1,
+              colour = &quot;#e34a33&quot;, linewidth = 1.2, se = TRUE,
+              fill   = &quot;#fdbb84&quot;) +
+  scale_x_continuous(limits = c(0, NA)) +
+  labs(x = &quot;Physical distance (Mb)&quot;, y = expression(r^2),
+       title = &quot;Genome-wide LD decay&quot;) +
+  theme_bw(base_size = 13)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-decay-plot-1.png" alt="Genome-wide LD decay: r² vs physical distance. LOESS smoother shown in red." width="960" />
+<p class="caption">
+Genome-wide LD decay: r² vs physical distance. LOESS smoother shown in
+red.
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code># ── Estimate LD half-life (distance where smoothed r² = 0.5 × max r²) ────
+ld_smooth &lt;- ld_decay %&gt;%
+  filter(!is.na(r2), dist_mb &lt;= 100) %&gt;%
+  arrange(dist_mb)
+
+loess_fit  &lt;- loess(r2 ~ dist_mb, data = ld_smooth, span = 0.1)
+dist_grid  &lt;- seq(0, max(ld_smooth$dist_mb, na.rm = TRUE), by = 0.1)
+r2_hat     &lt;- predict(loess_fit, newdata = data.frame(dist_mb = dist_grid))
+
+r2_max     &lt;- max(r2_hat, na.rm = TRUE)
+half_r2    &lt;- r2_max / 2
+half_dist  &lt;- dist_grid[which.min(abs(r2_hat - half_r2))]
+
+cat(sprintf(&quot;Maximum smoothed r²         : %.3f\n&quot;, r2_max))</code></pre>
+<pre><code>Maximum smoothed r²         : 0.342</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;LD half-life distance        : %.1f Mb  (r² = %.3f)\n&quot;,
+            half_dist, half_r2))</code></pre>
+<pre><code>LD half-life distance        : 1.9 Mb  (r² = 0.171)</code></pre>
+<pre class="r"><code># Per-chromosome half-life
+ld_hl_chr &lt;- map_dfr(chromosomes, function(chr) {
+  d &lt;- ld_decay %&gt;% filter(Chr == chr, !is.na(r2), dist_mb &lt;= 100)
+  if (nrow(d) &lt; 50) return(tibble(Chr = chr, halflife_Mb = NA_real_))
+  fit   &lt;- tryCatch(loess(r2 ~ dist_mb, data = d, span = 0.15),
+                    error = function(e) NULL)
+  if (is.null(fit)) return(tibble(Chr = chr, halflife_Mb = NA_real_))
+  r2h   &lt;- predict(fit, newdata = data.frame(dist_mb = dist_grid))
+  mx    &lt;- max(r2h, na.rm = TRUE)
+  hl    &lt;- dist_grid[which.min(abs(r2h - mx / 2))]
+  tibble(Chr = chr, max_r2 = round(mx, 3), halflife_Mb = round(hl, 2))
+})
+
+ld_hl_chr %&gt;%
+  kable(col.names = c(&quot;Chromosome&quot;,&quot;Max r²&quot;,&quot;LD half-life (Mb)&quot;),
+        caption = &quot;Per-chromosome LD decay statistics&quot;) %&gt;%
+  kable_styling(bootstrap_options = c(&quot;striped&quot;,&quot;hover&quot;,&quot;condensed&quot;),
+                full_width = FALSE)</code></pre>
+<table class="table table-striped table-hover table-condensed" style="color: black; width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Per-chromosome LD decay statistics
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Chromosome
+</th>
+<th style="text-align:right;">
+Max r²
+</th>
+<th style="text-align:right;">
+LD half-life (Mb)
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+1
+</td>
+<td style="text-align:right;">
+0.345
+</td>
+<td style="text-align:right;">
+2.0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2
+</td>
+<td style="text-align:right;">
+0.319
+</td>
+<td style="text-align:right;">
+2.8
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3
+</td>
+<td style="text-align:right;">
+0.399
+</td>
+<td style="text-align:right;">
+3.7
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4
+</td>
+<td style="text-align:right;">
+0.349
+</td>
+<td style="text-align:right;">
+1.6
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5
+</td>
+<td style="text-align:right;">
+0.212
+</td>
+<td style="text-align:right;">
+5.4
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+6
+</td>
+<td style="text-align:right;">
+0.200
+</td>
+<td style="text-align:right;">
+6.1
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+0.401
+</td>
+<td style="text-align:right;">
+2.0
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="per-chromosome-ld-decay" class="section level2" number="5.3">
+<h2><span class="header-section-number">5.3</span> Per-chromosome LD
+Decay</h2>
+<pre class="r"><code>ld_decay %&gt;%
+  filter(!is.na(r2)) %&gt;%
+  ggplot(aes(x = dist_mb, y = r2)) +
+  geom_point(alpha = 0.07, size = 0.5, colour = &quot;grey50&quot;) +
+  geom_smooth(method = &quot;loess&quot;, span = 0.15,
+              colour = &quot;#3182bd&quot;, linewidth = 1, se = FALSE) +
+  facet_grid(~Chr) +
+  labs(x = &quot;Physical distance (Mb)&quot;, y = expression(r^2),
+       title = &quot;Per-chromosome LD decay&quot;) +
+  theme_bw(base_size = 11)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-decay-per-chr-1.png" alt="Per-chromosome LD decay curves" width="960" />
+<p class="caption">
+Per-chromosome LD decay curves
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code>ld_hl_chr %&gt;%
+  filter(!is.na(halflife_Mb)) %&gt;%
+  ggplot(aes(x = Chr, y = halflife_Mb, fill = Chr)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(halflife_Mb, &quot; Mb&quot;)),
+            vjust = -0.3, size = 3.5) +
+  scale_fill_brewer(palette = &quot;Set3&quot;) +
+  labs(x = &quot;Chromosome&quot;, y = &quot;LD half-life (Mb)&quot;,
+       title = &quot;Distance at which r² declines to half its maximum&quot;) +
+  theme_bw(base_size = 13)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-halflife-barplot-1.png" alt="LD half-life distance per chromosome" width="960" />
+<p class="caption">
+LD half-life distance per chromosome
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+</div>
+<div id="ld-heatmaps-per-chromosome-subsampled" class="section level2"
+number="5.4">
+<h2><span class="header-section-number">5.4</span> LD Heatmaps (per
+chromosome, subsampled)</h2>
+<p>LD heatmaps are computed on a thinned set of markers per chromosome
+(max <code>n_heatmap</code> markers equally spaced along the chromosome)
+to keep computation tractable.</p>
+<pre class="r"><code>n_heatmap &lt;- 200   # markers per chromosome for heatmap
+
+for (chr in chromosomes) {
+  chr_map &lt;- map_sub %&gt;% filter(Chr == chr) %&gt;% arrange(Pos)
+  if (nrow(chr_map) &lt; 5) next
+
+  # Thin to n_heatmap equally spaced markers
+  idx_thin &lt;- round(seq(1, nrow(chr_map), length.out = min(n_heatmap, nrow(chr_map))))
+  chr_map  &lt;- chr_map[idx_thin, ]
+  G_chr    &lt;- geno_mapped[, chr_map$Marker, drop = FALSE]
+  n_m      &lt;- ncol(G_chr)
+
+  # r² matrix
+  r2_mat &lt;- matrix(NA_real_, n_m, n_m)
+  for (i in seq_len(n_m)) {
+    for (j in seq_len(i)) {
+      r2_mat[i, j] &lt;- r2_mat[j, i] &lt;- r2_pair(G_chr[, i], G_chr[, j])
+    }
+  }
+  diag(r2_mat) &lt;- 1
+  rownames(r2_mat) &lt;- colnames(r2_mat) &lt;- chr_map$Marker
+
+  if (ld_heatmap_avail) {
+    library(LDheatmap)
+    LDheatmap(r2_mat,
+              genetic.distances = chr_map$Pos / 1e6,
+              distances         = &quot;physical&quot;,
+              LDmeasure         = &quot;r&quot;,          # LDheatmap uses r not r²
+              main              = paste0(&quot;LD heatmap – Chr &quot;, chr,
+                                         &quot;  (n = &quot;, n_m, &quot; markers)&quot;),
+              color             = heat.colors(20),
+              flip              = TRUE)
+  } else {
+    # Fallback: corrplot heatmap
+    corrplot(r2_mat,
+             method   = &quot;color&quot;,
+             col      = colorRampPalette(c(&quot;white&quot;,&quot;#FC8D59&quot;,&quot;#D73027&quot;))(50),
+             tl.pos   = &quot;n&quot;,
+             cl.cex   = 0.7,
+             title    = paste0(&quot;r² heatmap – Chr &quot;, chr,
+                                &quot; (n = &quot;, n_m, &quot; markers)&quot;),
+             mar      = c(0, 0, 2, 0))
+  }
+}</code></pre>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-1.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-2.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-3.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-4.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-5.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-6.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<img src="figure/14.%20Pop_Structure_LD.Rmd/ld-heatmaps-7.png" width="960" style="display: block; margin: auto;" />
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<div class="alert alert-warning">
+<p>
+<strong>Warning:</strong> The above code chunk cached its results, but
+it won’t be re-run if previous chunks it depends on are updated. If you
+need to use caching, it is highly recommended to also set
+<code>knitr::opts_chunk$set(autodep = TRUE)</code> at the top of the
+file (in a chunk that is not cached). Alternatively, you can customize
+the option <code>dependson</code> for each individual chunk that is
+cached. Using either <code>autodep</code> or <code>dependson</code> will
+remove this warning. See the
+<a href="https://yihui.name/knitr/options/#cache"
+>knitr cache options</a> for more details.
+</p>
+</div>
+</div>
+</div>
+<div id="focal-snp-ld-plot" class="section level1" number="6">
+<h1><span class="header-section-number">6</span> Focal-SNP LD Plot</h1>
+<p>Set the three parameters below to plot r² between <strong>one focal
+SNP</strong> and every other SNP within a chosen physical window on its
+chromosome. This is useful for inspecting LD around a candidate marker
+(e.g. a GWAS hit or a QTL peak).</p>
+<pre class="r"><code># ════════════════════════════════════════════════════════════
+# USER PARAMETERS — edit these three lines
+focal_snp    &lt;- colnames(geno_a)[1]   # marker name, e.g. &quot;BK_03&quot;
+window_mb    &lt;- 10                    # ± distance in Mb around the focal SNP
+r2_threshold &lt;- 0.2                   # highlight markers above this r² (dashed line)
+# ════════════════════════════════════════════════════════════
+
+# Print available markers on each chromosome so the user can pick one
+snp_map %&gt;%
+  group_by(Chr) %&gt;%
+  summarise(n_markers = n(),
+            example_markers = paste(head(Marker, 3), collapse = &quot;, &quot;),
+            .groups = &quot;drop&quot;) %&gt;%
+  kable(caption = &quot;Available chromosomes — pick a focal_snp from any of these&quot;) %&gt;%
+  kable_styling(bootstrap_options = c(&quot;striped&quot;,&quot;hover&quot;,&quot;condensed&quot;),
+                full_width = FALSE)</code></pre>
+<table class="table table-striped table-hover table-condensed" style="color: black; width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Available chromosomes — pick a focal_snp from any of these
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Chr
+</th>
+<th style="text-align:right;">
+n_markers
+</th>
+<th style="text-align:left;">
+example_markers
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+1
+</td>
+<td style="text-align:right;">
+4231
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-127, BOPA1_3107-422, JHI-Hv50k-2016-121
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+2
+</td>
+<td style="text-align:right;">
+6359
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-58514, SCRI_RS_166806, JHI-Hv50k-2016-58520
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+3
+</td>
+<td style="text-align:right;">
+5884
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-148514, JHI-Hv50k-2016-148512, JHI-Hv50k-2016-148511
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+4
+</td>
+<td style="text-align:right;">
+4423
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-226331, JHI-Hv50k-2016-226336, JHI-Hv50k-2016-226341
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+5
+</td>
+<td style="text-align:right;">
+7162
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-277196, JHI-Hv50k-2016-277215, JHI-Hv50k-2016-277222
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+6
+</td>
+<td style="text-align:right;">
+4685
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-368836, JHI-Hv50k-2016-368813, JHI-Hv50k-2016-368814
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+5421
+</td>
+<td style="text-align:left;">
+JHI-Hv50k-2016-436955, JHI-Hv50k-2016-436957, SCRI_RS_6865
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code># ── Validate focal SNP ─────────────────────────────────────────────────────
+if (!focal_snp %in% snp_map$Marker) {
+  stop(&quot;focal_snp &#39;&quot;, focal_snp, &quot;&#39; not found in the SNP map. &quot;,
+       &quot;Check the marker name or choose another.&quot;)
+}
+
+focal_row  &lt;- snp_map %&gt;% filter(Marker == focal_snp)
+focal_chr  &lt;- focal_row$Chr
+focal_pos  &lt;- focal_row$Pos
+window_bp  &lt;- window_mb * 1e6
+
+cat(sprintf(&quot;Focal SNP  : %s\n&quot;, focal_snp))</code></pre>
+<pre><code>Focal SNP  : BK_03</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Chromosome : %s\n&quot;, focal_chr))</code></pre>
+<pre><code>Chromosome : 7</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Position   : %.3f Mb\n&quot;, focal_pos / 1e6))</code></pre>
+<pre><code>Position   : 121.697 Mb</code></pre>
+<pre class="r"><code>cat(sprintf(&quot;Window     : ± %.1f Mb  [%.3f – %.3f Mb]\n&quot;,
+            window_mb,
+            (focal_pos - window_bp) / 1e6,
+            (focal_pos + window_bp) / 1e6))</code></pre>
+<pre><code>Window     : ± 10.0 Mb  [111.697 – 131.697 Mb]</code></pre>
+<pre class="r"><code># ── Select markers in window ───────────────────────────────────────────────
+win_map &lt;- snp_map %&gt;%
+  filter(Chr  == focal_chr,
+         Pos  &gt;= focal_pos - window_bp,
+         Pos  &lt;= focal_pos + window_bp,
+         Marker %in% colnames(geno_a)) %&gt;%
+  arrange(Pos)
+
+cat(sprintf(&quot;Markers in window: %d\n&quot;, nrow(win_map)))</code></pre>
+<pre><code>Markers in window: 70</code></pre>
+<pre class="r"><code>if (nrow(win_map) &lt; 2) stop(&quot;Fewer than 2 mapped markers in window — widen window_mb.&quot;)
+
+# ── Compute r² between focal SNP and every window marker ──────────────────
+focal_geno &lt;- geno_imp[, focal_snp]
+
+ld_focal &lt;- win_map %&gt;%
+  mutate(
+    r2       = map_dbl(Marker, function(m) r2_pair(focal_geno, geno_imp[, m])),
+    dist_mb  = (Pos - focal_pos) / 1e6,    # signed: negative = upstream
+    Pos_Mb   = Pos / 1e6,
+    is_focal = Marker == focal_snp
+  )
+
+# ── Manhattan-style LD plot ───────────────────────────────────────────────
+p_ld &lt;- ggplot(ld_focal, aes(x = Pos_Mb, y = r2, colour = r2)) +
+  # window boundary lines
+  geom_vline(xintercept = c((focal_pos - window_bp) / 1e6,
+                             (focal_pos + window_bp) / 1e6),
+             linetype = &quot;dotted&quot;, colour = &quot;grey70&quot;) +
+  # r² threshold line
+  geom_hline(yintercept = r2_threshold, linetype = &quot;dashed&quot;,
+             colour = &quot;grey40&quot;, linewidth = 0.6) +
+  annotate(&quot;text&quot;, x = min(ld_focal$Pos_Mb),
+           y = r2_threshold + 0.02, hjust = 0, size = 3, colour = &quot;grey40&quot;,
+           label = paste0(&quot;r² = &quot;, r2_threshold)) +
+  # all markers
+  geom_point(size = 2.5, alpha = 0.85) +
+  # focal SNP highlighted
+  geom_point(data = filter(ld_focal, is_focal),
+             size = 4, shape = 23, fill = &quot;black&quot;, colour = &quot;white&quot;) +
+  # focal SNP label
+  geom_text(data = filter(ld_focal, is_focal),
+            aes(label = Marker), vjust = -1, size = 3, colour = &quot;black&quot;) +
+  scale_colour_gradientn(
+    colours = c(&quot;steelblue&quot;,&quot;#fdae61&quot;,&quot;#d73027&quot;),
+    limits  = c(0, 1), name = expression(r^2)
+  ) +
+  scale_y_continuous(limits = c(0, 1.02), breaks = seq(0, 1, 0.2)) +
+  labs(
+    x     = sprintf(&quot;Position on Chr %s (Mb)&quot;, focal_chr),
+    y     = expression(r^2),
+    title = sprintf(&quot;LD around %s (Chr %s : %.3f Mb) | window ± %.1f Mb&quot;,
+                    focal_snp, focal_chr, focal_pos / 1e6, window_mb)
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = &quot;right&quot;)
+
+print(p_ld)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/focal-snp-ld-1.png" alt="r² between the focal SNP and neighbours within the chosen window" width="960" />
+<p class="caption">
+r² between the focal SNP and neighbours within the chosen window
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code># ── Supplementary: r² vs signed distance ─────────────────────────────────
+p_decay &lt;- ggplot(ld_focal, aes(x = dist_mb, y = r2, colour = r2)) +
+  geom_vline(xintercept = 0, linetype = &quot;solid&quot;, colour = &quot;grey30&quot;,
+             linewidth = 0.4) +
+  geom_hline(yintercept = r2_threshold, linetype = &quot;dashed&quot;,
+             colour = &quot;grey40&quot;, linewidth = 0.6) +
+  geom_point(size = 2.5, alpha = 0.85) +
+  geom_point(data = filter(ld_focal, is_focal),
+             size = 4, shape = 23, fill = &quot;black&quot;, colour = &quot;white&quot;) +
+  geom_smooth(method = &quot;loess&quot;, span = 0.3, se = FALSE,
+              colour = &quot;black&quot;, linewidth = 0.7, linetype = &quot;dashed&quot;) +
+  scale_colour_gradientn(
+    colours = c(&quot;steelblue&quot;,&quot;#fdae61&quot;,&quot;#d73027&quot;),
+    limits  = c(0, 1), name = expression(r^2)
+  ) +
+  scale_y_continuous(limits = c(0, 1.02), breaks = seq(0, 1, 0.2)) +
+  labs(
+    x     = &quot;Distance from focal SNP (Mb)&quot;,
+    y     = expression(r^2),
+    title = &quot;r² vs signed distance from focal SNP&quot;
+  ) +
+  theme_bw(base_size = 13)
+
+print(p_decay)</code></pre>
+<div class="figure" style="text-align: center">
+<img src="figure/14.%20Pop_Structure_LD.Rmd/focal-snp-ld-2.png" alt="r² between the focal SNP and neighbours within the chosen window" width="960" />
+<p class="caption">
+r² between the focal SNP and neighbours within the chosen window
+</p>
+</div>
+<div class="alert alert-warning">
+<strong>Warning!</strong> The custom <code>fig.path</code> you set was
+ignored by workflowr.
+</div>
+<pre class="r"><code># ── Table: top markers in high LD with focal SNP ─────────────────────────
+ld_focal %&gt;%
+  filter(!is_focal, !is.na(r2)) %&gt;%
+  arrange(desc(r2)) %&gt;%
+  head(20) %&gt;%
+  mutate(Pos_Mb   = round(Pos_Mb,   4),
+         dist_mb  = round(dist_mb,  3),
+         r2       = round(r2,       3)) %&gt;%
+  select(Marker, Chr, Pos_Mb, dist_mb, r2) %&gt;%
+  kable(col.names = c(&quot;Marker&quot;,&quot;Chr&quot;,&quot;Position (Mb)&quot;,&quot;Distance (Mb)&quot;,&quot;r²&quot;),
+        caption   = sprintf(&quot;Top 20 markers in highest LD with %s&quot;, focal_snp)) %&gt;%
+  kable_styling(bootstrap_options = c(&quot;striped&quot;,&quot;hover&quot;,&quot;condensed&quot;),
+                full_width = FALSE)</code></pre>
+<table class="table table-striped table-hover table-condensed" style="color: black; width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Top 20 markers in highest LD with BK_03
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Marker
+</th>
+<th style="text-align:left;">
+Chr
+</th>
+<th style="text-align:right;">
+Position (Mb)
+</th>
+<th style="text-align:right;">
+Distance (Mb)
+</th>
+<th style="text-align:right;">
+r²
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474813
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+121.6917
+</td>
+<td style="text-align:right;">
+-0.006
+</td>
+<td style="text-align:right;">
+0.998
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+SCRI_RS_158126
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+121.6980
+</td>
+<td style="text-align:right;">
+0.001
+</td>
+<td style="text-align:right;">
+0.995
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+SCRI_RS_152074
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.0314
+</td>
+<td style="text-align:right;">
+1.334
+</td>
+<td style="text-align:right;">
+0.986
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+SCRI_RS_158234
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+125.8691
+</td>
+<td style="text-align:right;">
+4.172
+</td>
+<td style="text-align:right;">
+0.929
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474804
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+121.6875
+</td>
+<td style="text-align:right;">
+-0.010
+</td>
+<td style="text-align:right;">
+0.587
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481244
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+122.8236
+</td>
+<td style="text-align:right;">
+1.126
+</td>
+<td style="text-align:right;">
+0.555
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481104
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.2574
+</td>
+<td style="text-align:right;">
+1.560
+</td>
+<td style="text-align:right;">
+0.537
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481205
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.2448
+</td>
+<td style="text-align:right;">
+1.548
+</td>
+<td style="text-align:right;">
+0.537
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481152
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.2512
+</td>
+<td style="text-align:right;">
+1.554
+</td>
+<td style="text-align:right;">
+0.536
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481098
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.2580
+</td>
+<td style="text-align:right;">
+1.561
+</td>
+<td style="text-align:right;">
+0.533
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474836
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+122.2751
+</td>
+<td style="text-align:right;">
+0.578
+</td>
+<td style="text-align:right;">
+0.466
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-481101
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+123.2578
+</td>
+<td style="text-align:right;">
+1.561
+</td>
+<td style="text-align:right;">
+0.327
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474530
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+117.8042
+</td>
+<td style="text-align:right;">
+-3.893
+</td>
+<td style="text-align:right;">
+0.278
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474154
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+114.9605
+</td>
+<td style="text-align:right;">
+-6.737
+</td>
+<td style="text-align:right;">
+0.278
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474153
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+114.9606
+</td>
+<td style="text-align:right;">
+-6.737
+</td>
+<td style="text-align:right;">
+0.278
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474315
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+116.4941
+</td>
+<td style="text-align:right;">
+-5.203
+</td>
+<td style="text-align:right;">
+0.278
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474164
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+115.0209
+</td>
+<td style="text-align:right;">
+-6.676
+</td>
+<td style="text-align:right;">
+0.277
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474330
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+116.7126
+</td>
+<td style="text-align:right;">
+-4.985
+</td>
+<td style="text-align:right;">
+0.276
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474090
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+113.2615
+</td>
+<td style="text-align:right;">
+-8.436
+</td>
+<td style="text-align:right;">
+0.254
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+JHI-Hv50k-2016-474024
+</td>
+<td style="text-align:left;">
+7
+</td>
+<td style="text-align:right;">
+112.5641
+</td>
+<td style="text-align:right;">
+-9.133
+</td>
+<td style="text-align:right;">
+0.249
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="summary" class="section level1" number="7">
+<h1><span class="header-section-number">7</span> Summary</h1>
+<pre class="r"><code>tibble(
+  Analysis    = c(&quot;Markers total&quot;,&quot;Markers mapped&quot;,&quot;Individuals&quot;,
+                  &quot;Mean MAF&quot;,&quot;Missing rate&quot;,
+                  &quot;PCs explaining 50% var&quot;,&quot;PCs explaining 80% var&quot;,
+                  &quot;Optimal K (DAPC)&quot;,&quot;Genome-wide LD half-life (Mb)&quot;),
+  Value = c(
+    n_snp,
+    length(mapped_markers),
+    n_ind,
+    round(mean(maf_vec, na.rm = TRUE), 3),
+    round(mean(miss_vec) * 100, 2),
+    sum(cumsum(var_exp) &lt;= 50) + 1,
+    sum(cumsum(var_exp) &lt;= 80) + 1,
+    if (exists(&quot;k_opt&quot;)) k_opt else NA,
+    round(half_dist, 2)
+  )
+) %&gt;%
+  kable(caption = &quot;Analysis summary&quot;) %&gt;%
+  kable_styling(bootstrap_options = c(&quot;striped&quot;,&quot;hover&quot;,&quot;condensed&quot;),
+                full_width = FALSE)</code></pre>
+<table class="table table-striped table-hover table-condensed" style="color: black; width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Analysis summary
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Analysis
+</th>
+<th style="text-align:right;">
+Value
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+Markers total
+</td>
+<td style="text-align:right;">
+39025.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Markers mapped
+</td>
+<td style="text-align:right;">
+38165.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Individuals
+</td>
+<td style="text-align:right;">
+662.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Mean MAF
+</td>
+<td style="text-align:right;">
+0.209
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Missing rate
+</td>
+<td style="text-align:right;">
+0.960
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+PCs explaining 50% var
+</td>
+<td style="text-align:right;">
+7.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+PCs explaining 80% var
+</td>
+<td style="text-align:right;">
+14.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Optimal K (DAPC)
+</td>
+<td style="text-align:right;">
+3.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Genome-wide LD half-life (Mb)
+</td>
+<td style="text-align:right;">
+1.900
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>sessionInfo()</code></pre>
+<pre><code>R version 4.4.2 (2024-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 22621)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=Estonian_Estonia.utf8  LC_CTYPE=Estonian_Estonia.utf8   
+[3] LC_MONETARY=Estonian_Estonia.utf8 LC_NUMERIC=C                     
+[5] LC_TIME=Estonian_Estonia.utf8    
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] adegenet_2.1.11  ade4_1.7-23      readxl_1.4.3     kableExtra_1.4.0
+ [5] knitr_1.50       corrplot_0.95    factoextra_1.0.7 RSpectra_0.16-2 
+ [9] patchwork_1.3.2  lubridate_1.9.4  forcats_1.0.0    stringr_1.5.1   
+[13] dplyr_1.1.4      purrr_1.0.2      readr_2.1.5      tidyr_1.3.1     
+[17] tibble_3.2.1     ggplot2_4.0.1    tidyverse_2.0.0 
+
+loaded via a namespace (and not attached):
+ [1] tidyselect_1.2.1   viridisLite_0.4.2  farver_2.1.2       S7_0.2.1          
+ [5] fastmap_1.2.0      promises_1.5.0     digest_0.6.37      timechange_0.3.0  
+ [9] mime_0.13          lifecycle_1.0.4    cluster_2.1.6      magrittr_2.0.3    
+[13] compiler_4.4.2     rlang_1.1.5        sass_0.4.10        tools_4.4.2       
+[17] igraph_2.2.2       yaml_2.3.10        labeling_0.4.3     plyr_1.8.9        
+[21] xml2_1.5.1         RColorBrewer_1.1-3 workflowr_1.7.2    withr_3.0.2       
+[25] grid_4.4.2         git2r_0.36.2       xtable_1.8-4       scales_1.4.0      
+[29] MASS_7.3-61        cli_3.6.3          rmarkdown_2.30     vegan_2.7-3       
+[33] generics_0.1.4     otel_0.2.0         rstudioapi_0.17.1  reshape2_1.4.5    
+[37] tzdb_0.4.0         ape_5.8-1          cachem_1.1.0       splines_4.4.2     
+[41] parallel_4.4.2     cellranger_1.1.0   vctrs_0.6.5        Matrix_1.7-3      
+[45] jsonlite_2.0.0     hms_1.1.4          ggrepel_0.9.6      seqinr_4.2-36     
+[49] systemfonts_1.3.1  jquerylib_0.1.4    glue_1.8.0         codetools_0.2-20  
+[53] stringi_1.8.4      gtable_0.3.6       later_1.4.4        pillar_1.11.1     
+[57] htmltools_0.5.8.1  R6_2.6.1           textshaping_1.0.4  rprojroot_2.1.1   
+[61] evaluate_1.0.5     shiny_1.12.1       lattice_0.22-6     httpuv_1.6.16     
+[65] bslib_0.9.0        Rcpp_1.1.0         svglite_2.2.2      nlme_3.1-166      
+[69] permute_0.9-10     mgcv_1.9-1         xfun_0.53          fs_1.6.6          
+[73] pkgconfig_2.0.3   </code></pre>
+<br>
+<p>
+<button type="button" class="btn btn-default btn-workflowr btn-workflowr-sessioninfo" data-toggle="collapse" data-target="#workflowr-sessioninfo" style="display: block;">
+<span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
+Session information
+</button>
+</p>
+<div id="workflowr-sessioninfo" class="collapse">
+<pre class="r"><code>sessionInfo()</code></pre>
+<pre><code>R version 4.4.2 (2024-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 22621)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=Estonian_Estonia.utf8  LC_CTYPE=Estonian_Estonia.utf8   
+[3] LC_MONETARY=Estonian_Estonia.utf8 LC_NUMERIC=C                     
+[5] LC_TIME=Estonian_Estonia.utf8    
+
+time zone: America/New_York
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] adegenet_2.1.11  ade4_1.7-23      readxl_1.4.3     kableExtra_1.4.0
+ [5] knitr_1.50       corrplot_0.95    factoextra_1.0.7 RSpectra_0.16-2 
+ [9] patchwork_1.3.2  lubridate_1.9.4  forcats_1.0.0    stringr_1.5.1   
+[13] dplyr_1.1.4      purrr_1.0.2      readr_2.1.5      tidyr_1.3.1     
+[17] tibble_3.2.1     ggplot2_4.0.1    tidyverse_2.0.0 
+
+loaded via a namespace (and not attached):
+ [1] tidyselect_1.2.1   viridisLite_0.4.2  farver_2.1.2       S7_0.2.1          
+ [5] fastmap_1.2.0      promises_1.5.0     digest_0.6.37      timechange_0.3.0  
+ [9] mime_0.13          lifecycle_1.0.4    cluster_2.1.6      magrittr_2.0.3    
+[13] compiler_4.4.2     rlang_1.1.5        sass_0.4.10        tools_4.4.2       
+[17] igraph_2.2.2       yaml_2.3.10        labeling_0.4.3     plyr_1.8.9        
+[21] xml2_1.5.1         RColorBrewer_1.1-3 workflowr_1.7.2    withr_3.0.2       
+[25] grid_4.4.2         git2r_0.36.2       xtable_1.8-4       scales_1.4.0      
+[29] MASS_7.3-61        cli_3.6.3          rmarkdown_2.30     vegan_2.7-3       
+[33] generics_0.1.4     otel_0.2.0         rstudioapi_0.17.1  reshape2_1.4.5    
+[37] tzdb_0.4.0         ape_5.8-1          cachem_1.1.0       splines_4.4.2     
+[41] parallel_4.4.2     cellranger_1.1.0   vctrs_0.6.5        Matrix_1.7-3      
+[45] jsonlite_2.0.0     hms_1.1.4          ggrepel_0.9.6      seqinr_4.2-36     
+[49] systemfonts_1.3.1  jquerylib_0.1.4    glue_1.8.0         codetools_0.2-20  
+[53] stringi_1.8.4      gtable_0.3.6       later_1.4.4        pillar_1.11.1     
+[57] htmltools_0.5.8.1  R6_2.6.1           textshaping_1.0.4  rprojroot_2.1.1   
+[61] evaluate_1.0.5     shiny_1.12.1       lattice_0.22-6     httpuv_1.6.16     
+[65] bslib_0.9.0        Rcpp_1.1.0         svglite_2.2.2      nlme_3.1-166      
+[69] permute_0.9-10     mgcv_1.9-1         xfun_0.53          fs_1.6.6          
+[73] pkgconfig_2.0.3   </code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+
+<!-- Adjust MathJax settings so that all math formulae are shown using
+TeX fonts only; see
+https://docs.mathjax.org/en/latest/web/configuration.html. This will make
+the presentation more consistent at the cost of the webpage sometimes
+taking slightly longer to load. Note that this only works because the
+footer is added to webpages before the MathJax javascript. -->
+<script type="text/x-mathjax-config">
+  MathJax.Hub.Config({
+    "HTML-CSS": { availableFonts: ["TeX"] }
+  });
+</script>
+
+
+
+
+</div>
+</div>
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.odd').parent('tbody').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- tabsets -->
+
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+
+$(document).ready(function () {
+  $('.tabset-dropdown > .nav-tabs > li').click(function () {
+    $(this).parent().toggleClass('nav-tabs-open');
+  });
+});
+</script>
+
+<!-- code folding -->
+<script>
+$(document).ready(function () {
+  window.initializeCodeFolding("hide" === "show");
+});
+</script>
+
+<script>
+$(document).ready(function ()  {
+
+    // temporarily add toc-ignore selector to headers for the consistency with Pandoc
+    $('.unlisted.unnumbered').addClass('toc-ignore')
+
+    // move toc-ignore selectors from section div to header
+    $('div.section.toc-ignore')
+        .removeClass('toc-ignore')
+        .children('h1,h2,h3,h4,h5').addClass('toc-ignore');
+
+    // establish options
+    var options = {
+      selectors: "h1,h2,h3",
+      theme: "bootstrap3",
+      context: '.toc-content',
+      hashGenerator: function (text) {
+        return text.replace(/[.\\/?&!#<>]/g, '').replace(/\s/g, '_');
+      },
+      ignoreSelector: ".toc-ignore",
+      scrollTo: 0
+    };
+    options.showAndHide = true;
+    options.smoothScroll = true;
+
+    // tocify
+    var toc = $("#TOC").tocify(options).data("toc-tocify");
+});
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
