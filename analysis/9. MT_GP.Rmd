@@ -19,9 +19,7 @@ library(ASRgenomics)
 library(readxl)
 library(MASS)
 library(tidyr)
-library(dplyr)
 library(caret)
-library(asreml)
 ```
 
 
@@ -29,20 +27,20 @@ library(asreml)
 
 ## **1. Importing the phenotypic data**
 
-Importing the raw agronomic, mq and spectral 
+Importing the raw agronomic, mq and spectral
 ```{r}
 base_path <- if (.Platform$OS.type == "windows") {
-  "C:/Users/Siim Sepp/NY_WMB"
+  "C:/Users/Siim Sepp/NY_WMBCL"
 } else {
-  "~/Documents/GitHub/NY_WMB"
+  "~/Documents/GitHub/NY_WMBCL"
 }
 
 load(file.path(base_path, "data/data_ag.Rdata"))
 load(file.path(base_path, "data/data_mq.Rdata"))
 load(file.path(base_path, "data/data_sp.Rdata"))
 load(file.path(base_path, "data/MT_raw_wide.Rdata"))
-data_ag<- data_ag %>% na.omit()
-data_mq<- data_mq %>% na.omit()
+data_ag <- data_ag %>% na.omit()
+data_mq <- data_mq %>% na.omit()
 ```
 
 
@@ -50,22 +48,22 @@ data_mq<- data_mq %>% na.omit()
 
 ```{r}
 #raw VI TP join for MT GP
-corVI_raw <-  data.frame(
-    plot_id = c(
+corVI_raw <- data.frame(
+  plot_id = c(
     rownames(MT_raw_w$KET21_4),
     rownames(MT_raw_w$SNY22_6),
     rownames(MT_raw_w$MCG23_5),
     rownames(MT_raw_w$HELF24_7),
     rownames(MT_raw_w$MCG25_12)
   ),
-    NDVI = c(
+  NDVI = c(
     MT_raw_w$KET21_4[, 1],
     MT_raw_w$SNY22_6[, 1],
     MT_raw_w$MCG23_5[, 1],
     MT_raw_w$HELF24_7[, 1],
     MT_raw_w$MCG25_12[, 1]
   ),
-    PSRI = c(
+  PSRI = c(
     MT_raw_w$KET21_4[, 9],
     MT_raw_w$SNY22_6[, 9],
     MT_raw_w$MCG23_5[, 9],
@@ -75,7 +73,7 @@ corVI_raw <-  data.frame(
 )
 
 
-MT<- corVI_raw %>% filter(!plot_id %in% data_ag$plot_id)
+MT <- corVI_raw %>% filter(!plot_id %in% data_ag$plot_id)
 
 MT_ag_raw_df <- left_join(data_ag, corVI_raw, by = "plot_id")
 MT_mq_raw_df <- left_join(data_mq, corVI_raw, by = "plot_id")
@@ -118,18 +116,18 @@ corVI_pr <- data.frame(
 
 
 #merge agronomic
-load("data/ag_BLUE_spatial.RData")
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
 
-preds<- preds[,-5] %>% pivot_wider(values_from = "Predicted", names_from = "VI") 
-preds<- preds %>% na.omit()
+preds <- preds[, -5] %>% pivot_wider(values_from = "Predicted", names_from = "VI")
+preds <- preds %>% na.omit()
 
-MT_ag_pr_df <- left_join(preds, corVI_pr, by = c("GID", "Env")) 
+MT_ag_pr_df <- left_join(preds, corVI_pr, by = c("GID", "Env"))
 
 
 #merge mq
-load("data/mq_BLUP_spatial.RData")
+load(file.path(base_path, "data/mq_BLUP_spatial.RData"))
 str(preds)
-preds<- preds[,-5] %>% pivot_wider(values_from = "Predicted", names_from = "VI") 
+preds <- preds[, -5] %>% pivot_wider(values_from = "Predicted", names_from = "VI")
 
 MT_mq_pr_df <- left_join(preds, corVI_pr, by = c("GID", "Env"))
 ```
@@ -139,15 +137,16 @@ MT_mq_pr_df <- left_join(preds, corVI_pr, by = c("GID", "Env"))
 
 Adding the FPC and PCA data
 ```{r}
-load("data/F_PCA_scoresG.Rdata")
-FPC_scores<- FPCA_scores_df %>% filter(VI %in% c("NDVI", "PSRI")) %>% pivot_wider(names_from = VI, values_from = colnames(FPCA_scores_df[1:3]))
+load(file.path(base_path, "data/F_PCA_scoresG.Rdata"))
+FPC_scores <- FPCA_scores_df %>%
+  filter(VI %in% c("NDVI", "PSRI")) %>%
+  pivot_wider(names_from = VI, values_from = colnames(FPCA_scores_df[1:3]))
 
 
-MT_raw_ag<-  left_join(MT_ag_raw_df, FPC_scores[,-2], by = c("plot_id")) 
+MT_raw_ag <- left_join(MT_ag_raw_df, FPC_scores[, -2], by = c("plot_id"))
 
-MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[,-2], by = c("plot_id"))
+MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[, -2], by = c("plot_id"))
 ```
-
 
 
 
@@ -158,9 +157,9 @@ MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[,-2], by = c("plot_id"))
 ```{r}
 safe_cor <- function(x, y) {
   ok <- stats::complete.cases(x, y)
-  if (sum(ok) < 2L) return(NA_real_)    # not enough pairs
+  if (sum(ok) < 2L) return(NA_real_)
   x <- x[ok]; y <- y[ok]
-  if (stats::sd(x) == 0 || stats::sd(y) == 0) return(NA_real_)  # zero variance
+  if (stats::sd(x) == 0 || stats::sd(y) == 0) return(NA_real_)
   suppressWarnings(stats::cor(x, y))
 }
 
@@ -174,6 +173,17 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
   res_all  <- data.frame()
   fail_log <- list()
 
+  # Precompute Ginv once per environment — GID set is consistent across all
+  # trait pairs since no row-level NA filtering is applied (complete.cases commented out)
+  GIDs_global <- intersect(unique(as.character(data$GID)), rownames(A1))
+  if (length(GIDs_global) == 0L) {
+    warning("[", env_label, "] No common GIDs between data and A1.")
+    return(list(results = data.frame(), failures = data.frame()))
+  }
+  A1_sub    <- A1[GIDs_global, GIDs_global]
+  Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv      <- G.inverse(Ghat.bend)$Ginv
+
   for (i in cor_traits) {
     for (j in traits) {
       if (i == j) next
@@ -181,24 +191,24 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
       message("\n[", env_label, "] Fitting model: ", paste0("cbind(", i, ", ", j, ") ~ trait"))
 
       all_traits <- c(i, j)
-      df_sub <- data[, c("GID", "Row", "Column", all_traits)]
-      #df_sub <- df_sub[complete.cases(df_sub), ]
-      df_sub$GID <- factor(df_sub$GID)
-
-      GIDs <- intersect(df_sub$GID, rownames(A1))
-      df_sub <- df_sub[df_sub$GID %in% GIDs, , drop = FALSE]
+      df_sub <- data[, c("GID", "Row", "Column", all_traits), drop = FALSE]
+      df_sub <- df_sub[df_sub$GID %in% GIDs_global, , drop = FALSE]
       if (nrow(df_sub) == 0L) next
 
-      A1_sub    <- A1[GIDs, GIDs]
-      Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = 1e-03)$Gb
-      Ginv      <- G.inverse(Ghat.bend)$Ginv
+      # Align GID factor levels to GIDs_global so they match Ginv row/col order
+      df_sub$GID <- factor(as.character(df_sub$GID), levels = GIDs_global)
 
       for (rep_run in seq_len(reps)) {
-        fold_ids <- sample(rep(seq_len(folds), length.out = nrow(df_sub)))
+        # Assign folds at the GID level to prevent data leakage across reps
+        gids_present <- unique(as.character(df_sub$GID))
+        fold_gid     <- sample(rep(seq_len(folds), length.out = length(gids_present)))
+        names(fold_gid) <- gids_present
+        # Map GID-level folds back to observation rows
+        fold_ids <- fold_gid[as.character(df_sub$GID)]
 
         for (f in seq_len(folds)) {
           # Long/stacked data
-          df_cv <- df_sub
+          df_cv       <- df_sub
           df_cv$units <- seq_len(nrow(df_cv))
 
           df_long <- rbind(
@@ -219,25 +229,27 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
             df_long$value[df_long$fold == f] <- NA
           }
 
-          # Random & rcov
+          # Random & residual
           if (spatial) {
             rand_formula <- ~ vm(GID, Ginv):corgh(trait)
-            rcov_formula <- ~ ar1(Row):ar1(Column):units
-            } else {
-              rand_formula <- ~ vm(GID, Ginv):corgh(trait)
-              rcov_formula <- ~ idv(units)}
+            res_formula  <- ~ ar1(Row):ar1(Column):units
+          } else {
+            rand_formula <- ~ vm(GID, Ginv):corgh(trait)
+            res_formula  <- ~ idv(units)
+          }
 
           # Fit
           mod_cv <- tryCatch({
             asreml(
-              fixed   = value ~ trait,
-              random  = rand_formula,
-              rcov    = rcov_formula,
-              data    = df_long,
+              fixed     = value ~ trait,
+              random    = rand_formula,
+              residual  = res_formula,
+              data      = df_long,
               na.action = list(x = "include", y = "include"),
               workspace = 1e8,
               maxit     = 100,
-              ai.sing   = TRUE
+              ai.sing   = TRUE,
+              trace     = FALSE
             )
           }, error = function(e) {
             fail_log[[length(fail_log) + 1L]] <<- data.frame(
@@ -247,6 +259,11 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
             return(NULL)
           })
           if (is.null(mod_cv)) next
+
+          # Run one additional iteration if model did not converge
+          if (!mod_cv$converge) {
+            mod_cv <- tryCatch(update(mod_cv), error = function(e) mod_cv)
+          }
 
           # Predict (response trait j)
           pred_cv <- tryCatch({
@@ -262,16 +279,19 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
             return(NULL)
           })
           if (is.null(pred_cv)) next
-          # Truth vs predictions
-          truth  <- data.frame(GID = df_sub$GID[fold_ids == f],
-                               true = df_sub[[j]][fold_ids == f])
-          # keep only non-missing truth
+
+          # Truth: observed j for test GIDs, aggregated to GID level so that
+          # correlation is computed at the genotype level (valid CV metric for GBLUP)
+          test_gids <- names(fold_gid)[fold_gid == f]
+          truth <- df_sub[as.character(df_sub$GID) %in% test_gids, c("GID", j), drop = FALSE]
+          colnames(truth)[2] <- "true"
           truth <- truth[!is.na(truth$true), , drop = FALSE]
-          
-          # merge may still be empty if predict failed for those GIDs
-          merged <- merge(truth, pred_cv[, c("GID", "BV_cv")], by = "GID", all = FALSE)
-          # compute correlation safely (returns NA if not enough data)
-          cor_val <- if (nrow(merged) > 0L) safe_cor(merged$BV_cv, merged$true) else NA_real_
+          if (nrow(truth) < 2L) next
+          truth <- aggregate(true ~ GID, data = truth, FUN = mean, na.rm = TRUE)
+
+          merged  <- merge(truth, pred_cv[, c("GID", "BV_cv")], by = "GID", all = FALSE)
+          cor_val <- if (nrow(merged) >= 2L) safe_cor(merged$BV_cv, merged$true) else NA_real_
+
           res_all <- rbind(res_all, data.frame(
             Env = env_label, Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f, Cor = cor_val,
             stringsAsFactors = FALSE))
@@ -298,7 +318,7 @@ run_bivariate_gblup_cv_over_envs <- function(MT_raw_ag, A1,
                                              spatial = FALSE,
                                              mask = c("j_only", "both", "i_only")) {
   mask <- match.arg(mask)
-  all_res <- list()
+  all_res  <- list()
   all_fail <- list()
 
   for (e in envs) {
@@ -318,20 +338,24 @@ run_bivariate_gblup_cv_over_envs <- function(MT_raw_ag, A1,
       warning("No overlapping traits/cor_traits in Env = ", e)
       next
     }
-    dat_e$GID<-as.factor(dat_e$GID)
-    dat_e$Row<-as.factor(dat_e$Row)
-    dat_e$Column<-as.factor(dat_e$Column)
+
+    dat_e$GID <- as.factor(dat_e$GID)
+    # Sort Row/Column numerically so ar1() ordering is correct for spatial models
+    dat_e$Row    <- factor(dat_e$Row,
+                           levels = sort(unique(as.integer(as.character(dat_e$Row)))))
+    dat_e$Column <- factor(dat_e$Column,
+                           levels = sort(unique(as.integer(as.character(dat_e$Column)))))
 
     out <- run_bivariate_gblup_cv(
-      data      = dat_e,
-      A1        = A1,
-      traits    = present_traits,
-      cor_traits= present_cor,
-      reps      = reps,
-      folds     = folds,
-      spatial   = spatial,
-      mask      = mask,
-      env_label = e
+      data       = dat_e,
+      A1         = A1,
+      traits     = present_traits,
+      cor_traits = present_cor,
+      reps       = reps,
+      folds      = folds,
+      spatial    = spatial,
+      mask       = mask,
+      env_label  = e
     )
 
     if (!is.null(out$results) && nrow(out$results) > 0L)
@@ -356,24 +380,24 @@ run_bivariate_gblup_cv_over_envs <- function(MT_raw_ag, A1,
 
 
 ```{r}
-envs       <- c("KET21","SNY22", "MCG23", "HELF24", "MCG25")
-mqtrait<- c("KernelWeight.mg.",  "on6.64....","MaltExtract...",  "BarleyProtein...",
-            "WortProtein...","S.T",  "DP..ASBC." ,"Alpha.amylase.20.DU.",
-            "Beta.glucan.ppm.","FAN.ppm.","AdjunctQualityScore",  "All_MaltQualityScore")                             
-agtraits <- c("yield_kgha","HD_JD")
-cor_traits <- c("NDVI", "PSRI" , "FPC1_NDVI", "FPC1_PSRI", "FPC2_NDVI", "FPC2_PSRI", "FPC3_NDVI", "FPC3_PSRI")
-#set.seed(1) 
-load("data/geno/WMB_master_geno.RData")
+envs    <- c("KET21", "SNY22", "MCG23", "HELF24", "MCG25")
+mqtrait <- c("KernelWeight.mg.", "on6.64....", "MaltExtract...", "BarleyProtein..",
+             "WortProtein...", "S.T", "DP..ASBC.", "Alpha.amylase.20.DU.",
+             "Beta.glucan.ppm.", "FAN.ppm.", "AdjunctQualityScore", "All_MaltQualityScore")
+agtraits   <- c("yield_kgha", "HD_JD")
+cor_traits <- c("NDVI", "PSRI", "FPC1_NDVI", "FPC1_PSRI", "FPC2_NDVI", "FPC2_PSRI",
+                "FPC3_NDVI", "FPC3_PSRI")
+load(file.path(base_path, "data/geno/WMB_master_geno.RData"))
 ```
 
 
 
 ```{r}
 #w spatial
-
-MT_raw_ag$GID <- as.character(MT_raw_ag$GID)
+MT_raw_ag$GID    <- as.character(MT_raw_ag$GID)
 MT_raw_ag$Column <- as.character(MT_raw_ag$Column)
-MT_raw_ag$Row <- as.character(MT_raw_ag$Row)
+MT_raw_ag$Row    <- as.character(MT_raw_ag$Row)
+
 MT_ag_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
   MT_raw_ag, A1,
   envs       = envs,
@@ -381,14 +405,11 @@ MT_ag_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
   cor_traits = cor_traits,
   reps = 50, folds = 5,
   spatial = TRUE,
-  mask = "j_only"   # "j_only" (default), "both", or "i_only"
+  mask = "j_only"
 )
 
-save(MT_ag_res_raw_sp, file = "MT_ag_res_raw_sp.Rdata")
+save(MT_ag_res_raw_sp, file = file.path(base_path, "output/MT_ag_res_raw_sp.Rdata"))
 ```
-
-
-
 
 
 
@@ -396,20 +417,23 @@ save(MT_ag_res_raw_sp, file = "MT_ag_res_raw_sp.Rdata")
 ## **5. MT_GBLUP mq raw**
 
 ```{r}
-envs<- unique(MT_raw_MQ$Env)
-MT_mq_res_raw_sp <-run_bivariate_gblup_cv_over_envs(
+MT_raw_MQ$GID    <- as.character(MT_raw_MQ$GID)
+MT_raw_MQ$Column <- as.character(MT_raw_MQ$Column)
+MT_raw_MQ$Row    <- as.character(MT_raw_MQ$Row)
+
+envs <- unique(MT_raw_MQ$Env)
+MT_mq_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
   MT_raw_MQ, A1,
   envs       = envs,
   traits     = mqtrait,
   cor_traits = cor_traits,
   reps = 50, folds = 5,
   spatial = TRUE,
-  mask = "j_only"   # "j_only" (default), "both", or "i_only"
+  mask = "j_only"
 )
 
-save(MT_mq_res_raw_sp, file = "MT_mq_res_raw_sp.Rdata")
+save(MT_mq_res_raw_sp, file = file.path(base_path, "output/MT_mq_res_raw_sp.Rdata"))
 ```
-
 
 
 
@@ -418,9 +442,9 @@ save(MT_mq_res_raw_sp, file = "MT_mq_res_raw_sp.Rdata")
 
 ```{r}
 MT_ag_pr_df
-MT_ag_pr_df$Row<- NA
-MT_ag_pr_df$Column<- NA
-envs<- unique(MT_ag_pr_df$Env)
+MT_ag_pr_df$Row    <- NA
+MT_ag_pr_df$Column <- NA
+envs <- unique(MT_ag_pr_df$Env)
 
 
 MT_ag_res_pr <- run_bivariate_gblup_cv_over_envs(
@@ -430,11 +454,10 @@ MT_ag_res_pr <- run_bivariate_gblup_cv_over_envs(
   cor_traits = cor_traits,
   reps = 50, folds = 5,
   spatial = FALSE,
-  mask = "j_only"   # "j_only" (default), "both", or "i_only"
+  mask = "j_only"
 )
 
-
-save(MT_ag_res_pr, file = "MT_ag_res_pr.Rdata")
+save(MT_ag_res_pr, file = file.path(base_path, "output/MT_ag_res_pr.Rdata"))
 ```
 
 
@@ -443,9 +466,9 @@ save(MT_ag_res_pr, file = "MT_ag_res_pr.Rdata")
 ## **7. MT_GBLUP mq pred**
 
 #```{r}
-MT_mq_pr_df$Row<- NA
-MT_mq_pr_df$Column<- NA
-envs<- unique(MT_mq_pr_df$Env)
+MT_mq_pr_df$Row    <- NA
+MT_mq_pr_df$Column <- NA
+envs <- unique(MT_mq_pr_df$Env)
 
 MT_mg_res_pr <- run_bivariate_gblup_cv_over_envs(
   MT_mq_pr_df, A1,
@@ -454,303 +477,12 @@ MT_mg_res_pr <- run_bivariate_gblup_cv_over_envs(
   cor_traits = cor_traits,
   reps = 50, folds = 5,
   spatial = FALSE,
-  mask = "j_only"   # "j_only" (default), "both", or "i_only"
+  mask = "j_only"
 )
 
-
-save(MT_mq_res_pr, file = "MT_mq_res_pr.Rdata")
+save(MT_mg_res_pr, file = file.path(base_path, "output/MT_mq_res_pr.Rdata"))
 #```
 
 
 
-
-**8. Sparse testing CV2**
-
-```{r}
-run_bivariate_gblup_cv2 <- function(data, A1,
-                                    traits,       # response traits to predict (j)
-                                    cor_traits,   # correlated helper traits (i)
-                                    envs = NULL,
-                                    reps = 5, folds = 5,
-                                    spatial = FALSE,
-                                    mask = c("j_only", "both", "i_only"),
-                                    eig.tol = 1e-3) {
-  mask <- match.arg(mask)
-
-  safe_cor <- function(x, y) {
-    ok <- stats::complete.cases(x, y)
-    if (sum(ok) < 2) return(NA_real_)
-    suppressWarnings(stats::cor(x[ok], y[ok]))
-  }
-
-  # env list
-  if (is.null(envs)) envs <- if (is.factor(data$Env)) levels(data$Env) else sort(unique(data$Env))
-  data <- data[data$Env %in% envs, , drop = FALSE]
-  if (nrow(data) == 0L) stop("No data left after filtering envs.")
-
-  # Basic columns
-  if (!("GID" %in% names(data))) stop("data must contain column 'GID'")
-  if (!("Env" %in% names(data))) stop("data must contain column 'Env'")
-
-  # Align GIDs to A1 once (global)
-  data$GID <- as.character(data$GID)
-  keep_gids <- intersect(unique(data$GID), rownames(A1))
-  data <- data[data$GID %in% keep_gids, , drop = FALSE]
-  if (length(keep_gids) < 5) stop("Too few common GIDs between data and A1.")
-
-  # Subset and invert/bend G matrix
-  A1_sub    <- A1[keep_gids, keep_gids, drop = FALSE]
-  Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = eig.tol)$Gb
-  Ginv      <- G.inverse(Ghat.bend, sparse = TRUE)$Ginv
-
-  # Factors
-  data$GID <- factor(data$GID, levels = keep_gids)
-  data$Env <- factor(data$Env, levels = envs)
-
-  has_spatial <- spatial && all(c("Row", "Column") %in% names(data))
-  if (has_spatial) {
-    data$Row    <- as.factor(data$Row)
-    data$Column <- as.factor(data$Column)
-  }
-
-  res_all  <- data.frame()
-  fail_log <- list()
-
-  # Loop over trait pairs (i helps predict j)
-  for (i in cor_traits) {
-    for (j in traits) {
-      if (i == j) next
-      if (!(i %in% names(data)) || !(j %in% names(data))) next
-
-      message("\nCV2 bivariate model: ", paste0("cbind(", i, ", ", j, ")  pooled across Env"))
-
-      # Work on required columns only
-      df_sub <- data[, unique(c("GID", "Env", if (has_spatial) c("Row", "Column") else NULL, i, j)), drop = FALSE]
-
-      # Remove rows where BOTH traits are missing (nothing to contribute)
-      ok_any <- !(is.na(df_sub[[i]]) & is.na(df_sub[[j]]))
-      df_sub <- df_sub[ok_any, , drop = FALSE]
-      if (nrow(df_sub) == 0L) next
-
-      # CV2 folds assigned at GID level (crucial)
-      gids <- levels(df_sub$GID)
-
-      for (rep_run in seq_len(reps)) {
-        set.seed(1000 + rep_run)
-
-        fold_gid <- sample(rep(seq_len(folds), length.out = length(gids)))
-        names(fold_gid) <- gids
-
-        for (f in seq_len(folds)) {
-
-          # Build long / stacked form (two traits)
-          df_cv <- df_sub
-          df_cv$units <- seq_len(nrow(df_cv))
-
-          df_long <- rbind(
-            data.frame(GID = df_cv$GID, Env = df_cv$Env,
-                       Row = if (has_spatial) df_cv$Row else NA,
-                       Column = if (has_spatial) df_cv$Column else NA,
-                       trait = i, value = df_cv[[i]], units = df_cv$units,
-                       stringsAsFactors = FALSE),
-            data.frame(GID = df_cv$GID, Env = df_cv$Env,
-                       Row = if (has_spatial) df_cv$Row else NA,
-                       Column = if (has_spatial) df_cv$Column else NA,
-                       trait = j, value = df_cv[[j]], units = df_cv$units,
-                       stringsAsFactors = FALSE)
-          )
-          df_long$trait <- factor(df_long$trait, levels = c(i, j))
-
-          # ---- CV2 masking: for each environment, hide only that env's records for test GIDs ----
-          # test GIDs for this fold
-          test_gids <- names(fold_gid)[fold_gid == f]
-          test_gids <- factor(test_gids, levels = levels(df_long$GID))
-
-          # mask trait values in an ENV-SPECIFIC way (CV2 sparse testing)
-          # We mask j (or i / both) ONLY for GIDs in test_gids, separately within each Env.
-          if (mask == "j_only") {
-            df_long$value[df_long$trait == j & df_long$GID %in% test_gids] <- NA
-          } else if (mask == "i_only") {
-            df_long$value[df_long$trait == i & df_long$GID %in% test_gids] <- NA
-          } else if (mask == "both") {
-            df_long$value[df_long$GID %in% test_gids] <- NA
-          }
-
-          # Random genetic with 2x2 (co)variance across traits
-          rand_formula <- ~ vm(GID, Ginv):corgh(trait)
-
-          # Residual structure
-          # Pooled across envs: simplest robust choice is idv(units).
-          # If you want spatial: use Env-specific AR1xAR1 via at(Env) (ASReml supports this pattern).
-          if (has_spatial) {
-            rcov_formula <- ~ at(Env):ar1(Row):ar1(Column):units
-          } else {
-            rcov_formula <- ~ idv(units)
-          }
-
-          # Fit pooled model across Env
-          mod_cv <- tryCatch({
-            asreml(
-              fixed     = value ~ trait + Env,   # allow env mean shifts (recommended in pooled model)
-              random    = rand_formula,
-              rcov      = rcov_formula,
-              data      = df_long,
-              na.action = list(x = "include", y = "include"),
-              workspace = 1e8,
-              maxit     = 100,
-              ai.sing   = TRUE
-            )
-          }, error = function(e) e)
-
-          if (inherits(mod_cv, "error")) {
-            fail_log[[length(fail_log) + 1L]] <- data.frame(
-              Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f,
-              Stage = "model", Error = mod_cv$message, stringsAsFactors = FALSE
-            )
-            next
-          }
-
-          # Predict BV for GID:trait, keep j
-          pred_cv <- tryCatch({
-            p <- predict(mod_cv, classify = "GID:trait")$pvals
-            p <- p[p$trait == j, , drop = FALSE]
-            names(p)[names(p) == "predicted.value"] <- "BV_cv"
-            p
-          }, error = function(e) e)
-
-          if (inherits(pred_cv, "error") || is.null(pred_cv)) {
-            fail_log[[length(fail_log) + 1L]] <- data.frame(
-              Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f,
-              Stage = "predict", Error = if (inherits(pred_cv, "error")) pred_cv$message else "NULL preds",
-              stringsAsFactors = FALSE
-            )
-            next
-          }
-
-          # ---- Evaluate CV2: ONLY the masked cells (Env x test GIDs) for trait j ----
-          # "Truth" = original observed j values for those GIDs within each Env
-          truth <- df_sub[df_sub$GID %in% test_gids, c("GID", "Env", j), drop = FALSE]
-          colnames(truth)[3] <- "true"
-          truth <- truth[!is.na(truth$true), , drop = FALSE]
-          if (nrow(truth) < 2) next
-
-          # merge predicted BV by GID
-          merged <- merge(truth, pred_cv[, c("GID", "BV_cv")], by = "GID", all = FALSE)
-          if (nrow(merged) < 2) next
-
-          # CV2 results reported per ENV (since masking is env-specific conceptually)
-          # Here we compute accuracy within each environment for this fold.
-          for (e in levels(truth$Env)) {
-            m_e <- merged[merged$Env == e, , drop = FALSE]
-            cor_val <- if (nrow(m_e) >= 2) safe_cor(m_e$BV_cv, m_e$true) else NA_real_
-
-            res_all <- rbind(res_all, data.frame(
-              Env = e, Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f,
-              n_test = nrow(m_e),
-              Cor = cor_val,
-              stringsAsFactors = FALSE
-            ))
-          }
-        }
-      }
-    }
-  }
-
-  list(
-    results  = res_all,
-    failures = if (length(fail_log)) do.call(rbind, fail_log) else NULL
-  )
-}
-
-```
-
-
-#MT ag raw
-```{r}
-tr<- colnames(MT_raw_ag)[7:8]
-
-MT_cv2_ag_raw <- run_bivariate_gblup_cv2(
-  data      = MT_raw_ag,
-  A1        = A1,
-  traits    = agtraits,
-  cor_traits= cor_traits,
-  envs      = unique(MT_raw_ag$Env),
-  reps      = 5,
-  folds     = 50,
-  spatial   = FALSE,
-  mask      = "j_only"
-)
-
-save(MT_cv2_ag_raw , file = "MT_cv2_ag_raw_res.Rdata")
-```
-
-
-#MT mq raw
-```{r}
-
-
-MT_cv2_mq_raw <- run_bivariate_gblup_cv2(
-  data      = MT_raw_MQ,
-  A1        = A1,
-  traits    = mqtrait,
-  cor_traits= cor_traits,
-  envs      = unique(MT_raw_MQ$Env),
-  reps      = 1,
-  folds     = 50,
-  spatial   = FALSE,
-  mask      = "j_only"
-)
-
-save(MT_cv2_mq_raw , file = "MT_cv2_mq_raw_res.Rdata")
-
-```
-
-
-
-#MT mq pred
-¤```{r}
-MT_mq_pr_df$Row<- NA
-MT_mq_pr_df$Column<- NA
-envs<- unique(MT_mq_pr_df$Env)
-
-tr<- colnames(MT_mq_pr_df)[3:14]
-cor_tr<- "NDVI"
-MT_cv2_mq_pr <- run_bivariate_gblup_cv2(
-  data      = MT_mq_pr_df,
-  A1        = A1,
-  traits    = tr,
-  cor_traits= cor_tr,
-  envs      = envs,
-  reps      = 1,
-  folds     = 50,
-  spatial   = FALSE,
-  mask      = "j_only"
-)
-
-save(MT_cv2_mq_pr , file = "MT_cv2_mq_pr_res.Rdata")
-¤```
-
-
-#MT ag pred
-```{r}
-MT_ag_pr_df$Row<- NA
-MT_ag_pr_df$Column<- NA
-envs<- unique(MT_ag_pr_df$Env)
-
-
-
-  MT_cv2_ag_pr <- run_bivariate_gblup_cv2(
-  data      = MT_ag_pr_df,
-  A1        = A1,
-  traits    = agtraits,
-  cor_traits= cor_traits,
-  envs      = envs,
-  reps      = 1,
-  folds     = 50,
-  spatial   = FALSE,
-  mask      = "j_only"
-)
-
-save(MT_cv2_ag_pr , file = "MT_cv2_ag_pr_res.Rdata")
-```
 

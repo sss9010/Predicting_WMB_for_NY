@@ -1,0 +1,902 @@
+---
+title: "Phenotypic Correlations"
+author: "sss322"
+date: "2026-02-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## **Introduction**
+Pairwise Pearson correlations between agronomic (ag), malt quality (mq), functional-PCA spectral (pc), and raw spectral VI (sp) traits. Correlations are computed:
+
+- **Pooled** — all environments combined
+- **Within environment** — separately per `Env`
+- **Within timepoint** — separately per flight timepoint (sp traits only)
+- **Within environment × timepoint** — finest stratification for sp traits
+
+sp × pc correlations are **excluded** by design.
+
+
+## **0. Packages and data**
+
+```{r packages, message=FALSE}
+pkgs <- c("dplyr", "tidyr", "ggplot2", "forcats", "scales", "purrr")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+Sys.setenv(LANG = "en")
+```
+
+```{r load-data}
+paths <- c("C:/Users/Siim Sepp/NY_WMB/data",
+           "~/Documents/GitHub/NY_WMB/data",
+           "data")
+
+load_first <- function(fname, dirs = paths) {
+  for (d in dirs) {
+    p <- file.path(path.expand(d), fname)
+    if (file.exists(p)) { load(p, envir = .GlobalEnv); return(invisible(p)) }
+  }
+  stop("File not found: ", fname)
+}
+
+invisible(lapply(
+  c("data_ag.Rdata", "data_mq.Rdata", "data_sp.Rdata", "F_PCA_scores.Rdata"),
+  load_first
+))
+```
+
+
+## **1. Define traits and prepare merged datasets**
+
+```{r define-traits}
+# ---- Agronomic traits (cols 7:9 of data_ag) ----
+ag_traits <- colnames(data_ag)[7:9]
+
+# ---- Malt quality traits (cols 4:15 of data_mq) ----
+mq_traits <- colnames(data_mq)[4:15]
+
+# ---- Spectral VI traits (cols 5:13 of data_sp) ----
+sp_traits <- names(data_sp)[c(5,13)]
+
+# ---- Detect timepoint column in data_sp ----
+# (the non-id, non-Env column among cols 1:4)
+sp_id_cols <- colnames(data_sp)[1:4]
+tp_col <- setdiff(sp_id_cols, c("plot_id", "GID", "Env", "gid", "genotype"))
+if (length(tp_col) == 0) {
+  # fallback: the 4th column
+  tp_col <- colnames(data_sp)[4]
+}
+tp_col <- tp_col[1]
+message("Timepoint column detected: ", tp_col)
+
+# ---- Functional PCA scores (pc traits) ----
+data_pc <- FPCA_scores_df %>%
+  filter(VI %in% c("NDVI", "PSRI"))
+
+# Identify score columns (not plot_id / VI)
+score_cols <- setdiff(colnames(data_pc), c("plot_id", "VI"))
+data_pc <- data_pc %>%
+  pivot_wider(id_cols = "plot_id",
+              names_from  = "VI",
+              values_from = all_of(score_cols))
+
+pc_traits <- c("FPC1_NDVI" ,"FPC1_PSRI" ,"FPC2_NDVI" ,"FPC2_PSRI", "FPC3_NDVI", "FPC3_PSRI")
+
+# ---- Convenience: base id columns from each dataset ----
+ag_id <- c("plot_id", "GID", "Env")
+mq_id <- c("plot_id", "GID", "Env")
+
+# ---- ag base (keep id + ag_traits) ----
+ag_base <- data_ag[,c(1:3,7:9)] #%>% select(any_of(ag_id), all_of(ag_traits))
+
+# ---- mq base ----
+mq_base <- data_mq[,1:15] #%>% select(any_of(mq_id), all_of(mq_traits))
+# ---- sp: one row per plot (average over timepoints) for non-timepoint analyses ----
+sp_avg <- data_sp %>%
+  group_by(plot_id) %>%
+  summarise(across(all_of(sp_traits), \(x) mean(x, na.rm = TRUE)),
+            Env = first(Env), .groups = "drop")
+
+# ---- sp: full (per timepoint) dataset for within-timepoint analyses ----
+sp_full <- data_sp %>%
+  dplyr::select(plot_id, Env, all_of(tp_col), all_of(sp_traits))
+
+# ---- pc base ----
+pc_base <- data_pc
+```
+
+
+## **2. Helper functions**
+
+```{r helpers}
+# Pearson r with complete-case guard
+safe_cor <- function(x, y) {
+  ok <- complete.cases(x, y)
+  if (sum(ok) < 3) return(NA_real_)
+  cor(x[ok], y[ok])
+}
+
+# All pairwise correlations between x_traits and y_traits in a data frame
+# Returns: data.frame(x_trait, y_trait, r, n)
+pair_cors <- function(df, x_traits, y_traits) {
+  res <- vector("list", length(x_traits) * length(y_traits))
+  k   <- 1L
+  for (x in x_traits) {
+    for (y in y_traits) {
+      ok  <- complete.cases(df[[x]], df[[y]])
+      n   <- sum(ok)
+      r   <- if (n >= 3) cor(df[[x]][ok], df[[y]][ok]) else NA_real_
+      res[[k]] <- data.frame(x_trait = x, y_trait = y, r = r, n = n,
+                             stringsAsFactors = FALSE)
+      k <- k + 1L
+    }
+  }
+  do.call(rbind, res)
+}
+
+# Apply pair_cors within groups defined by group_cols (character vector)
+group_cors <- function(df, x_traits, y_traits, group_cols) {
+  df %>%
+    group_by(across(all_of(group_cols))) %>%
+    group_modify(~ pair_cors(.x, x_traits, y_traits)) %>%
+    ungroup()
+}
+
+# ---- Colour / labelling constants (consistent with project style) ----
+env_order <- c("KET21", "SNY22", "MCG23", "HELF24", "MCG25")
+
+trait_map <- c(
+  "KernelWeight.mg."    = "KW",
+  "on6.64...."          = "on6/64",
+  "winter_survival"     = "WS",
+  "MaltExtract..."      = "ME",
+  "BarleyProtein..."    = "BP",
+  "WortProtein..."      = "WP",
+  "S.T"                 = "S.T",
+  "DP..ASBC."           = "DP",
+  "Alpha.amylase.20.DU." = "AA",
+  "Beta.glucan.ppm."    = "BG",
+  "HD_JD"               = "HD",
+  "yield_kgha"          = "GY",
+  "FAN.ppm."            = "FAN",
+  "AdjunctQualityScore"  = "Adj.Sc",
+  "All_MaltQualityScore" = "All.Sc"
+)
+
+short_name <- function(x) ifelse(x %in% names(trait_map), trait_map[x], x)
+
+# Summarise a correlation data frame (from cors_all or any tagged df).
+# group_vars : character vector of columns to group by
+# filter_strat: optional character vector of stratification levels to keep
+cor_summary <- function(df, group_vars, filter_strat = NULL) {
+  if (!is.null(filter_strat))
+    df <- df %>% filter(stratification %in% filter_strat)
+  df %>%
+    filter(!is.na(r)) %>%
+    mutate(.abs_r = abs(r)) %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(
+      mean_r     = round(mean(r),      3),
+      mean_abs_r = round(mean(.abs_r), 3),
+      sd_r       = round(sd(r),        3),
+      max_abs_r  = round(max(.abs_r),  3),
+      n_pairs    = n(),
+      .groups    = "drop"
+    ) %>%
+    arrange(desc(mean_abs_r))
+}
+
+# Heatmap: rows = y_trait, cols = x_trait, tile fill = r
+# facet_col: optional grouping column for faceting (e.g. "Env", "Timepoint")
+plot_heatmap <- function(cors_df, x_col = "x_trait", y_col = "y_trait",
+                         r_col = "r", facet_col = NULL,
+                         title = "", base_size = 11) {
+  df <- cors_df %>%
+    mutate(
+      x_label = short_name(.data[[x_col]]),
+      y_label = short_name(.data[[y_col]])
+    )
+
+  p <- ggplot(df, aes(x = x_label, y = y_label, fill = .data[[r_col]])) +
+    geom_tile(colour = "grey90") +
+    geom_text(aes(label = ifelse(is.finite(.data[[r_col]]),
+                                 sprintf("%.2f", .data[[r_col]]), "")),
+              size = 6) +
+    scale_fill_gradient2(
+      low = "#2c7bb6", mid = "white", high = "#d7191c",
+      midpoint = 0, limits = c(-1, 1), name = "r",
+      na.value = "grey85"
+    ) +
+    labs(title = title, x = NULL, y = NULL) +
+    theme_minimal(base_size = base_size) +
+    theme(
+      panel.grid    = element_blank(),
+      axis.text   = element_text(size = 18),
+      plot.title    = element_text(hjust = 0.5, size = base_size + 1)
+    )
+
+  if (!is.null(facet_col)) {
+    p <- p + facet_wrap(reformulate(facet_col), scales = "free")
+  }
+  p
+}
+```
+
+
+## **3. ag × mq correlations**
+
+### 3.1 Pooled (over all environments)
+
+```{r agmq-pooled, fig.width=9, fig.height=5}
+agmq <- ag_base %>%
+  inner_join(mq_base %>% dplyr::select(plot_id, all_of(mq_traits)), by = "plot_id")
+
+cors_agmq_pooled <- pair_cors(agmq, ag_traits, mq_traits)
+
+
+cors_agmq_pooled <- cors_agmq_pooled %>%
+  mutate(x_trait = recode(x_trait, !!!trait_map)) %>%
+  mutate(y_trait = recode(y_trait, !!!trait_map)) 
+
+plot_heatmap(cors_agmq_pooled, title = "ag × mq — pooled over environments")
+```
+
+### 3.2 Within environment
+
+```{r agmq-within-env, fig.width=14, fig.height=5}
+cors_agmq_env <- group_cors(agmq, ag_traits, mq_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_agmq_env, facet_col = "Env",
+             title = "ag × mq — within environment")
+
+
+agmq1<- agmq %>% filter(Env== "MCG23")
+ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
+
+agmq1<- agmq %>% filter(Env== "HELF24")
+ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
+
+agmq1<- agmq %>% filter(Env== "MCG25")
+ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
+```
+
+### 3.3 Clustered heatmap (pooled)
+
+Hierarchical clustering (complete linkage, Euclidean distance) applied to both
+ag rows and mq columns.
+
+```{r agmq-clustered, fig.width=8, fig.height=5}
+library(pheatmap)
+
+# cors_agmq_pooled already has short names from the recode above
+cor_mat <- cors_agmq_pooled %>%
+  dplyr::select(x_trait, y_trait, r) %>%
+  tidyr::pivot_wider(names_from = y_trait, values_from = r) %>%
+  tibble::column_to_rownames("x_trait") %>%
+  as.matrix()
+
+pheatmap(cor_mat,
+         color            = colorRampPalette(c("#2c7bb6", "white", "#d7191c"))(100),
+         breaks           = seq(-1, 1, length.out = 101),
+         cluster_rows     = TRUE,
+         cluster_cols     = TRUE,
+         clustering_method = "complete",
+         display_numbers  = TRUE,
+         number_format    = "%.2f",
+         number_color     = "black",
+         fontsize_number  = 11,
+         fontsize_row     = 13,
+         fontsize_col     = 13,
+         main             = "ag × mq — pooled (clustered)",
+         border_color     = "grey90",
+         treeheight_row   = 35,
+         treeheight_col   = 35,
+         na_col           = "grey85")
+```
+
+### 3.4 Clustered heatmap — within environment
+
+```{r agmq-clustered-env, fig.width=7, fig.height=5, results='asis'}
+envs_present <- intersect(env_order,
+                          unique(as.character(cors_agmq_env$Env)))
+
+for (e in envs_present) {
+  cat("\n\n#### ", e, "\n\n")
+  mat_e <- cors_agmq_env %>%
+    filter(Env == e) %>%
+    dplyr::select(x_trait, y_trait, r) %>%
+    mutate(x_trait = short_name(x_trait),
+           y_trait = short_name(y_trait)) %>%
+    tidyr::pivot_wider(names_from = y_trait, values_from = r) %>%
+    tibble::column_to_rownames("x_trait") %>%
+    as.matrix()
+
+  # Skip if too few non-NA values to cluster
+  if (sum(!is.na(mat_e)) < 4) next
+
+  print(
+    pheatmap(mat_e,
+             color            = colorRampPalette(c("#2c7bb6", "white", "#d7191c"))(100),
+             breaks           = seq(-1, 1, length.out = 101),
+             cluster_rows     = nrow(mat_e) > 1,
+             cluster_cols     = ncol(mat_e) > 1,
+             clustering_method = "complete",
+             display_numbers  = TRUE,
+             number_format    = "%.2f",
+             number_color     = "black",
+             fontsize_number  = 11,
+             fontsize_row     = 13,
+             fontsize_col     = 13,
+             main             = paste0("ag × mq — ", e, " (clustered)"),
+             border_color     = "grey90",
+             treeheight_row   = 30,
+             treeheight_col   = 30,
+             na_col           = "grey85",
+             silent           = TRUE)
+  )
+}
+```
+
+
+## **4. ag × pc correlations**
+
+### 4.1 Pooled
+
+```{r agpc-pooled, fig.width=10, fig.height=5}
+agpc <- ag_base %>%
+  inner_join(pc_base, by = "plot_id")
+
+table(agpc$Env)
+
+cors_agpc_pooled <- pair_cors(agpc, ag_traits, pc_traits)
+
+plot_heatmap(cors_agpc_pooled, title = "ag × pc — pooled over environments")
+```
+
+### 4.2 Within environment
+
+```{r agpc-within-env, fig.width=16, fig.height=5}
+cors_agpc_env <- group_cors(agpc, ag_traits, pc_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_agpc_env, facet_col = "Env",
+             title = "ag × pc — within environment")
+```
+
+
+## **5. ag × sp correlations**
+
+*sp traits averaged over timepoints for the pooled and within-environment analyses.*
+
+### 5.1 Pooled
+
+```{r agsp-pooled, fig.width=9, fig.height=5}
+agsp <- ag_base %>%
+  inner_join(sp_avg %>% dplyr::select(plot_id, all_of(sp_traits)), by = "plot_id")
+
+cors_agsp_pooled <- pair_cors(agsp, ag_traits, sp_traits)
+
+plot_heatmap(cors_agsp_pooled, title = "ag × sp — pooled (sp averaged over timepoints)")
+```
+
+### 5.2 Within environment
+
+```{r agsp-within-env, fig.width=14, fig.height=5}
+cors_agsp_env <- group_cors(agsp, ag_traits, sp_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_agsp_env, facet_col = "Env",
+             title = "ag × sp — within environment (sp averaged over timepoints)")
+```
+
+### 5.3 Within timepoint (pooled over environments)
+
+```{r agsp-within-tp, fig.width=9, fig.height=10}
+agsp_tp <- ag_base %>%
+  inner_join(sp_full %>% dplyr::select(plot_id, all_of(tp_col), all_of(sp_traits)),
+             by = "plot_id")
+
+cors_agsp_tp <- group_cors(agsp_tp, ag_traits, sp_traits, tp_col) %>%
+  rename(Timepoint = all_of(tp_col))
+
+plot_heatmap(cors_agsp_tp, facet_col = "Timepoint",
+             title = "ag × sp — within timepoint (pooled over environments)")
+```
+
+### 5.4 Within environment × timepoint
+
+```{r agsp-env-tp, fig.width=14, fig.height=14}
+cors_agsp_env_tp <- group_cors(agsp_tp, ag_traits, sp_traits, c("Env", tp_col)) %>%
+  rename(Timepoint = all_of(tp_col)) %>%
+  mutate(Env = factor(Env, levels = env_order),
+         EnvTP = paste0(Env, " | ", Timepoint))
+
+plot_heatmap(cors_agsp_env_tp, facet_col = "EnvTP",
+             title = "ag × sp — within environment × timepoint",
+             base_size = 9)
+```
+
+
+## **6. mq × pc correlations**
+
+### 6.1 Pooled
+
+```{r mqpc-pooled, fig.width=10, fig.height=8}
+mqpc <- mq_base %>%
+  inner_join(pc_base, by = "plot_id")
+
+cors_mqpc_pooled <- pair_cors(mqpc, mq_traits, pc_traits)
+
+plot_heatmap(cors_mqpc_pooled, title = "mq × pc — pooled over environments")
+```
+
+### 6.2 Within environment
+
+```{r mqpc-within-env, fig.width=16, fig.height=8}
+cors_mqpc_env <- group_cors(mqpc, mq_traits, pc_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_mqpc_env, facet_col = "Env",
+             title = "mq × pc — within environment")
+```
+
+
+## **7. mq × sp correlations**
+
+### 7.1 Pooled
+
+```{r mqsp-pooled, fig.width=10, fig.height=8}
+mqsp <- mq_base %>%
+  inner_join(sp_avg %>% dplyr::select(plot_id, all_of(sp_traits)), by = "plot_id")
+
+cors_mqsp_pooled <- pair_cors(mqsp, mq_traits, sp_traits)
+
+plot_heatmap(cors_mqsp_pooled, title = "mq × sp — pooled (sp averaged over timepoints)")
+```
+
+### 7.2 Within environment
+
+```{r mqsp-within-env, fig.width=14, fig.height=8}
+cors_mqsp_env <- group_cors(mqsp, mq_traits, sp_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_mqsp_env, facet_col = "Env",
+             title = "mq × sp — within environment (sp averaged over timepoints)")
+```
+
+### 7.3 Within timepoint (pooled over environments)
+
+```{r mqsp-within-tp, fig.width=10, fig.height=22}
+mqsp_tp <- mq_base %>%
+  inner_join(sp_full %>% dplyr::select(plot_id, all_of(tp_col), all_of(sp_traits)),
+             by = "plot_id")
+
+cors_mqsp_tp <- group_cors(mqsp_tp, mq_traits, sp_traits, tp_col) %>%
+  rename(Timepoint = all_of(tp_col))
+
+plot_heatmap(cors_mqsp_tp, facet_col = "Timepoint",
+             title = "mq × sp — within timepoint (pooled over environments)")
+```
+
+### 7.4 Within environment × timepoint
+
+```{r mqsp-env-tp, fig.width=14, fig.height=28}
+cors_mqsp_env_tp <- group_cors(mqsp_tp, mq_traits, sp_traits, c("Env", tp_col)) %>%
+  rename(Timepoint = all_of(tp_col)) %>%
+  mutate(Env = factor(Env, levels = env_order),
+         EnvTP = paste0(Env, " | ", Timepoint))
+
+plot_heatmap(cors_mqsp_env_tp, facet_col = "EnvTP",
+             title = "mq × sp — within environment × timepoint",
+             base_size = 9)
+```
+
+
+## **8. sp × sp correlations**
+
+*sp × pc correlations are excluded by design.*
+
+### 8.1 Pooled
+
+```{r spsp-pooled, fig.width=8, fig.height=7}
+cors_spsp_pooled <- pair_cors(sp_avg, sp_traits, sp_traits)
+
+plot_heatmap(cors_spsp_pooled, title = "sp × sp — pooled (sp averaged over timepoints)")
+```
+
+### 8.2 Within environment
+
+```{r spsp-within-env, fig.width=14, fig.height=7}
+sp_avg_env <- sp_avg %>% dplyr::select(plot_id, Env, all_of(sp_traits))
+
+cors_spsp_env <- group_cors(sp_avg_env, sp_traits, sp_traits, "Env") %>%
+  mutate(Env = factor(Env, levels = env_order))
+
+plot_heatmap(cors_spsp_env, facet_col = "Env",
+             title = "sp × sp — within environment (sp averaged over timepoints)")
+```
+
+### 8.3 Within timepoint (pooled over environments)
+
+```{r spsp-within-tp, fig.width=8, fig.height=20}
+cors_spsp_tp <- group_cors(sp_full, sp_traits, sp_traits, tp_col) %>%
+  rename(Timepoint = all_of(tp_col))
+
+plot_heatmap(cors_spsp_tp, facet_col = "Timepoint",
+             title = "sp × sp — within timepoint (pooled over environments)")
+```
+
+### 8.4 Within environment × timepoint
+
+```{r spsp-env-tp, fig.width=14, fig.height=28}
+cors_spsp_env_tp <- group_cors(sp_full, sp_traits, sp_traits, c("Env", tp_col)) %>%
+  rename(Timepoint = all_of(tp_col)) %>%
+  mutate(Env = factor(Env, levels = env_order),
+         EnvTP = paste0(Env, " | ", Timepoint))
+
+plot_heatmap(cors_spsp_env_tp, facet_col = "EnvTP",
+             title = "sp × sp — within environment × timepoint",
+             base_size = 9)
+```
+
+
+## **9. Combined correlation dataset**
+
+Stack every pairwise result into one tidy data frame with metadata columns
+(`comparison`, `stratification`, `type_x/y`, `VI_x/y`, `PC_x/y`).
+
+```{r combine-all}
+# ==============================================================================
+# FIX: Convert all Timepoint columns to character before binding
+# ==============================================================================
+
+cors_all <- bind_rows(
+  # ag × mq
+  cors_agmq_pooled %>% mutate(comparison = "ag×mq", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_agmq_env    %>% mutate(comparison = "ag×mq", stratification = "env",
+                               Timepoint = NA_character_),
+  # ag × pc
+  cors_agpc_pooled %>% mutate(comparison = "ag×pc", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_agpc_env    %>% mutate(comparison = "ag×pc", stratification = "env",
+                               Timepoint = NA_character_),
+  # ag × sp
+  cors_agsp_pooled %>% mutate(comparison = "ag×sp", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_agsp_env    %>% mutate(comparison = "ag×sp", stratification = "env",
+                               Timepoint = NA_character_),
+  cors_agsp_tp     %>% mutate(comparison = "ag×sp", stratification = "timepoint",
+                               Env = NA_character_,
+                               Timepoint = as.character(Timepoint)),  # Convert to character
+  cors_agsp_env_tp %>% mutate(comparison = "ag×sp", stratification = "env×timepoint",
+                               Timepoint = as.character(Timepoint)),  # Convert to character
+  # mq × pc
+  cors_mqpc_pooled %>% mutate(comparison = "mq×pc", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_mqpc_env    %>% mutate(comparison = "mq×pc", stratification = "env",
+                               Timepoint = NA_character_),
+  # mq × sp
+  cors_mqsp_pooled %>% mutate(comparison = "mq×sp", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_mqsp_env    %>% mutate(comparison = "mq×sp", stratification = "env",
+                               Timepoint = NA_character_),
+  cors_mqsp_tp     %>% mutate(comparison = "mq×sp", stratification = "timepoint",
+                               Env = NA_character_,
+                               Timepoint = as.character(Timepoint)),  # Convert to character
+  cors_mqsp_env_tp %>% mutate(comparison = "mq×sp", stratification = "env×timepoint",
+                               Timepoint = as.character(Timepoint)),  # Convert to character
+  # sp × sp
+  cors_spsp_pooled %>% mutate(comparison = "sp×sp", stratification = "pooled",
+                               Env = NA_character_, Timepoint = NA_character_),
+  cors_spsp_env    %>% mutate(comparison = "sp×sp", stratification = "env",
+                               Timepoint = NA_character_),
+  cors_spsp_tp     %>% mutate(comparison = "sp×sp", stratification = "timepoint",
+                               Env = NA_character_,
+                               Timepoint = as.character(Timepoint)),  # Convert to character
+  cors_spsp_env_tp %>% mutate(comparison = "sp×sp", stratification = "env×timepoint",
+                               Timepoint = as.character(Timepoint))   # Convert to character
+) %>%
+  mutate(
+    Env            = as.character(Env),
+    abs_r          = abs(r),
+    type_x = case_when(
+      x_trait %in% ag_traits ~ "ag",
+      x_trait %in% mq_traits ~ "mq",
+      x_trait %in% pc_traits ~ "pc",
+      x_trait %in% sp_traits ~ "sp",
+      TRUE                   ~ "other"),
+    type_y = case_when(
+      y_trait %in% ag_traits ~ "ag",
+      y_trait %in% mq_traits ~ "mq",
+      y_trait %in% pc_traits ~ "pc",
+      y_trait %in% sp_traits ~ "sp",
+      TRUE                   ~ "other"),
+    # VI: for sp traits use trait name directly; for pc traits parse after "_"
+    VI_x = case_when(
+      type_x == "sp" ~ x_trait,
+      type_x == "pc" ~ sub(".*_", "", x_trait),
+      TRUE           ~ NA_character_),
+    VI_y = case_when(
+      type_y == "sp" ~ y_trait,
+      type_y == "pc" ~ sub(".*_", "", y_trait),
+      TRUE           ~ NA_character_),
+    # PC component label (e.g. FPC1, FPC2, FPC3)
+    PC_x = ifelse(type_x == "pc", sub("_.*", "", x_trait), NA_character_),
+    PC_y = ifelse(type_y == "pc", sub("_.*", "", y_trait), NA_character_),
+    comparison     = factor(comparison,
+                            levels = c("ag×mq","ag×pc","ag×sp",
+                                       "mq×pc","mq×sp","sp×sp")),
+    stratification = factor(stratification,
+                            levels = c("pooled","env","timepoint","env×timepoint"))
+  ) %>%
+  select(-any_of("EnvTP"))
+
+cat("Combined dataset:", nrow(cors_all), "rows ×", ncol(cors_all), "cols\n")
+cat("Stratification counts:\n")
+print(table(cors_all$comparison, cors_all$stratification, useNA = "ifany"))
+```
+
+
+## **10. Summary statistics**
+
+All pooled-stratification summaries use `filter_strat = "pooled"`.
+Tables show mean |r|, mean r, SD(r), max |r|, and pair count.
+
+### 10.1 By ag trait (pooled)
+
+```{r summary-ag-trait}
+unique(cors_all$comparison)
+cor_summary(
+  cors_all %>% 
+   filter(comparison != "ag×mq") %>%
+    filter(type_x == "ag"),
+  group_vars   = c("x_trait", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  mutate(x_trait = short_name(x_trait)) %>%
+  knitr::kable(caption = "Mean |r| per agronomic trait — pooled")
+```
+
+```{r plot-summary-ag, fig.width=8, fig.height=4}
+cor_summary(cors_all %>% filter(type_x == "ag"),
+            group_vars = c("x_trait", "comparison"), filter_strat = "pooled") %>%
+  mutate(x_label = short_name(x_trait)) %>%
+  ggplot(aes(x = fct_reorder(x_label, mean_abs_r), y = mean_abs_r, fill = comparison)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Mean |r| by ag trait (pooled)", x = NULL, y = "Mean |r|") +
+  theme_minimal()
+```
+
+### 10.2 By mq trait (pooled)
+
+```{r summary-mq-trait}
+cor_summary(
+  cors_all %>% filter(type_x == "mq"),
+  group_vars   = c("x_trait", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  mutate(x_trait = short_name(x_trait)) %>%
+  knitr::kable(caption = "Mean |r| per malt quality trait — pooled")
+```
+
+```{r plot-summary-mq, fig.width=9, fig.height=5}
+cor_summary(cors_all %>% filter(type_x == "mq"),
+            group_vars = c("x_trait", "comparison"), filter_strat = "pooled") %>%
+  mutate(x_label = short_name(x_trait)) %>%
+  ggplot(aes(x = fct_reorder(x_label, mean_abs_r), y = mean_abs_r, fill = comparison)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Mean |r| by mq trait (pooled)", x = NULL, y = "Mean |r|") +
+  theme_minimal()
+```
+
+### 10.3 By VI — raw spectral traits (pooled)
+
+```{r summary-by-vi-sp}
+cor_summary(
+  cors_all %>% filter(type_x == "sp"),
+  group_vars   = c("VI_x", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  rename(VI = VI_x) %>%
+  knitr::kable(caption = "Mean |r| per spectral VI (sp) — pooled")
+```
+
+```{r plot-summary-vi-sp, fig.width=8, fig.height=4}
+cor_summary(cors_all %>% filter(type_x == "sp"),
+            group_vars = c("VI_x", "comparison"), filter_strat = "pooled") %>%
+  ggplot(aes(x = fct_reorder(VI_x, mean_abs_r), y = mean_abs_r, fill = comparison)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Mean |r| by VI — sp traits (pooled)", x = NULL, y = "Mean |r|") +
+  theme_minimal()
+```
+
+### 10.4 By VI — functional-PCA traits (pooled)
+
+```{r summary-by-vi-pc}
+cor_summary(
+  cors_all %>% filter(type_x == "pc"),
+  group_vars   = c("VI_x", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  rename(VI = VI_x) %>%
+  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
+```
+
+### 10.5 By PC component (pooled)
+
+```{r summary-by-pc}
+cor_summary(
+  cors_all %>% filter(type_x == "pc"),
+  group_vars   = c("PC_x", "VI_x", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  rename(PC = PC_x, VI = VI_x) %>%
+  knitr::kable(caption = "Mean |r| by PC component and VI — pooled")
+```
+
+```{r plot-summary-pc, fig.width=8, fig.height=4}
+cor_summary(cors_all %>% filter(type_x == "pc"),
+            group_vars = c("PC_x", "VI_x", "comparison"), filter_strat = "pooled") %>%
+  mutate(pc_label = paste0(PC_x, " (", VI_x, ")")) %>%
+  ggplot(aes(x = fct_reorder(pc_label, mean_abs_r), y = mean_abs_r, fill = comparison)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Mean |r| by PC component — pooled", x = NULL, y = "Mean |r|") +
+  theme_minimal()
+```
+
+### 10.6 By environment
+
+```{r summary-by-env}
+cor_summary(
+  cors_all %>% filter(!is.na(Env)),
+  group_vars   = c("Env", "comparison"),
+  filter_strat = "env"
+) %>%
+  mutate(Env = factor(Env, levels = env_order)) %>%
+  arrange(comparison, Env) %>%
+  knitr::kable(caption = "Mean |r| by environment (env stratification)")
+```
+
+```{r plot-summary-env, fig.width=10, fig.height=5}
+cor_summary(cors_all %>% filter(!is.na(Env)),
+            group_vars = c("Env", "comparison"), filter_strat = "env") %>%
+  mutate(Env = factor(Env, levels = env_order)) %>%
+  ggplot(aes(x = Env, y = mean_abs_r, colour = comparison, group = comparison)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_colour_brewer(palette = "Dark2") +
+  labs(title = "Mean |r| across environments", x = NULL, y = "Mean |r|") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+### 10.7 Top correlations (pooled, |r| ≥ 0.30, excluding sp×sp)
+
+```{r top-cors}
+cors_all %>%
+  filter(stratification == "pooled",
+         !comparison %in% c("sp×sp"),
+         abs_r >= 0.30) %>%
+  mutate(x_label = short_name(x_trait),
+         y_label = short_name(y_trait)) %>%
+  select(comparison, x_label, y_label, r, n) %>%
+  arrange(desc(abs(r))) %>%
+  head(30) %>%
+  knitr::kable(digits = 3,
+               caption = "Top 30 pooled correlations |r| ≥ 0.30 (excluding sp×sp)")
+```
+
+
+
+#VI
+```{r}
+
+i<- cor_summary(
+  cors_all %>% 
+    filter(comparison %in% c( "ag×sp","mq×sp")) %>%
+    filter(type_x %in% c("ag", "mq")),
+  group_vars   = c("x_trait", "comparison"),
+  filter_strat = "pooled"
+) %>%
+  mutate(x_trait = short_name(x_trait)) %>%
+  arrange(comparison, mean_abs_r) %>% 
+  knitr::kable(caption = "Mean |r| per agronomic trait — pooled")
+
+mean(i$mean_abs_r)
+```
+
+
+PC
+```{r}
+
+i<- cor_summary(
+  cors_all %>% 
+    filter(comparison %in% c( "ag×pc","mq×pc")) %>%
+    filter(type_x %in% c("ag", "mq")),
+  group_vars   = c("Env", "VI_y") 
+) %>%
+  #mutate(x_trait = short_name(x_trait)) %>%
+  arrange(VI_y) %>% 
+  knitr::kable(caption = "Mean |r| per agronomic trait — pooled")
+
+
+#Trait Corr
+#SNY22  0.61
+#MCG23  0.29
+#KET21  0.24
+#MCG25  0.23
+#HELF24 0.12
+```
+
+WS
+```{r}
+data_ag %>%
+  group_by(Env) %>%
+  summarise(
+    n        = sum(!is.na(winter_survival)),
+    mean_WS  = mean(winter_survival, na.rm = TRUE),
+    sd_WS    = sd(winter_survival, na.rm = TRUE),
+    min_WS   = min(winter_survival, na.rm = TRUE),
+    max_WS   = max(winter_survival, na.rm = TRUE),
+    se_WS    = sd_WS / sqrt(n),
+    .groups  = "drop"
+  )
+
+
+```
+
+#WS in different Env-s. 
+#MCG23 77%
+#SNY22 79.4%
+#MCG25 81.9%
+#KET21 96.3%
+#HELF24 97.8%
+
+#mean_abs_r of VIs with all traits within Envs
+#SNY22  NDVI      0.594 
+#MCG23  NDVI      0.284 
+#KET21  NDVI      0.242 
+#MCG25  NDVI      0.233 
+#HELF24 NDVI      0.115 
+
+#SNY22  PSRI      0.627 
+#MCG23  PSRI      0.292 
+#KET21  PSRI      0.235 
+#MCG25  PSRI      0.215 
+#HELF24 PSRI      0.117 
+
+
+
+Table: Mean |r| per agronomic trait — pooled
+
+|Env    |VI_y | | mean_abs_r|  
+|:------|:----|------:|----------:|
+|SNY22  |NDVI | |      0.426|
+|MCG23  |NDVI | |      0.169| 
+|SNY22  |PSRI | |      0.393| 
+|MCG23  |PSRI | |      0.206| 
+
+
+|KET21  |NDVI | |      0.206| 
+|MCG25  |NDVI | |      0.194| 
+
+|HELF24 |NDVI | |      0.125| 
+|KET21  |PSRI | |      0.202| 
+|MCG25  |PSRI | |      0.196|
+|NA     |PSRI | |      0.146| 
+|HELF24 |PSRI | |      0.144| 
+
+
+

@@ -37,9 +37,9 @@ Importing the raw agronomic, mq and spectral
 ```{r}
 
 base_path <- if (.Platform$OS.type == "windows") {
-  "C:/Users/Siim Sepp/NY_WMB"
+  "C:/Users/Siim Sepp/NY_WMBCL"
 } else {
-  "~/Documents/GitHub/NY_WMB"
+  "~/Documents/GitHub/NY_WMBCL"
 }
 
 load(file.path(base_path, "data/data_ag.Rdata"))

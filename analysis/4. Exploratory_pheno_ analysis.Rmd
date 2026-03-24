@@ -783,6 +783,151 @@ print(heatmap_plot)
 
 
 
+# **5. PCA biplot — agronomic and malting quality traits**
+
+```{r pca_biplot_ag_mq, fig.width = 10, fig.height = 8, warning = FALSE, message = FALSE}
+# ---- Prepare trait matrix ----
+# damq joins agronomic (GY, HD, WS) and malt quality traits.
+# Restrict to complete cases so every trait contributes equally to the PCA.
+trait_cols <- colnames(damq)[-(1:3)]          # all trait columns (excl. plot_id, Env, GID)
+pca_mat    <- damq[, c("plot_id", "Env", trait_cols)]
+pca_mat$Alpha.amylase.20.DU. <- as.double(pca_mat$Alpha.amylase.20.DU.)
+pca_mat    <- pca_mat[complete.cases(pca_mat[, trait_cols]), ]
+
+# ---- Run PCA (centered and scaled) ----
+pca_res <- prcomp(pca_mat[, trait_cols], center = TRUE, scale. = TRUE)
+pve     <- round(summary(pca_res)$importance[2, ] * 100, 1)   # % variance per PC
+
+# ---- Scores (one point per observation) ----
+scores     <- as.data.frame(pca_res$x[, 1:2])
+scores$Env <- factor(pca_mat$Env, levels = env_order)
+
+# ---- Loadings (one arrow per trait) ----
+loadings           <- as.data.frame(pca_res$rotation[, 1:2])
+loadings$trait_raw <- rownames(loadings)
+
+# Map to short names; fall back to the raw column name for any unmapped trait
+trait_labels   <- c(trait_map, "WS" = "WS")
+mapped_labels  <- trait_labels[loadings$trait_raw]
+loadings$label <- ifelse(is.na(mapped_labels), loadings$trait_raw, mapped_labels)
+
+# Scale arrows so they span ~70 % of the score cloud radius
+scale_fac     <- max(abs(range(scores[, 1:2]))) /
+                 max(sqrt(loadings$PC1^2 + loadings$PC2^2)) * 0.70
+loadings$xend <- loadings$PC1 * scale_fac
+loadings$yend <- loadings$PC2 * scale_fac
+
+# ---- Biplot ----
+p_pca <- ggplot() +
+  # reference axes
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey65", linewidth = 0.4) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey65", linewidth = 0.4) +
+  # observation scores coloured by environment
+  geom_point(data  = scores,
+             aes(x = PC1, y = PC2, colour = Env),
+             alpha = 5.45, size = 4.8) +
+  # trait loading arrows
+  geom_segment(data = loadings,
+               aes(x = 0, y = 0, xend = xend, yend = yend),
+               arrow     = arrow(length = unit(0.22, "cm"), type = "closed"),
+               colour    = "black", linewidth = 0.75, linejoin = "mitre") +
+  # trait labels nudged 13 % beyond the arrowhead
+  geom_text(data = loadings,
+            aes(x = xend * 1.13, y = yend * 1.13, label = label),
+            size     = 3.6,
+            fontface = "bold",
+            colour   = "black") +
+  scale_colour_manual(values = pal, drop = FALSE) +
+  labs(
+    x       = paste0("PC1  (", pve[1], "% variance explained)"),
+    y       = paste0("PC2  (", pve[2], "% variance explained)"),
+    colour  = "Environment",
+    caption = paste0("n = ", nrow(pca_mat),
+                     " observations with complete agronomic + malting quality data.")
+  ) +
+  theme(
+    axis.title       = element_text(size = 13, face = "bold"),
+    axis.text        = element_text(size = 11),
+    legend.title     = element_text(size = 12, face = "bold"),
+    legend.text      = element_text(size = 11),
+    legend.position  = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.caption     = element_text(size = 9, colour = "grey50")
+  )
+
+print(p_pca)
+```
+
+
+### *PCA biplot within each environment*
+
+```{r pca_biplot_per_env, fig.width = 9, fig.height = 7, warning = FALSE, message = FALSE}
+# pca_mat, trait_cols and trait_labels are carried over from the chunk above.
+# Run a separate PCA for each environment and plot its biplot.
+
+for (e in env_order) {
+
+  df_e <- pca_mat[pca_mat$Env == e, ]
+
+  if (nrow(df_e) < 10) {
+    message("Skipping ", e, ": fewer than 10 complete observations.")
+    next
+  }
+
+  # ---- PCA within environment ----
+  pca_e <- prcomp(df_e[, trait_cols], center = TRUE, scale. = TRUE)
+  pve_e <- round(summary(pca_e)$importance[2, ] * 100, 1)
+
+  # ---- Scores ----
+  sc_e     <- as.data.frame(pca_e$x[, 1:2])
+
+  # ---- Loadings ----
+  ld_e           <- as.data.frame(pca_e$rotation[, 1:2])
+  ld_e$trait_raw <- rownames(ld_e)
+  mapped_e       <- trait_labels[ld_e$trait_raw]
+  ld_e$label     <- ifelse(is.na(mapped_e), ld_e$trait_raw, mapped_e)
+
+  # Scale arrows to ~70 % of score cloud radius
+  sf_e      <- max(abs(range(sc_e[, 1:2]))) /
+               max(sqrt(ld_e$PC1^2 + ld_e$PC2^2)) * 0.70
+  ld_e$xend <- ld_e$PC1 * sf_e
+  ld_e$yend <- ld_e$PC2 * sf_e
+
+  # ---- Biplot ----
+  p_e <- ggplot() +
+    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey65", linewidth = 0.4) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey65", linewidth = 0.4) +
+    geom_point(data = sc_e,
+               aes(x = PC1, y = PC2),
+               colour = pal[e], alpha = 0.55, size = 2) +
+    geom_segment(data = ld_e,
+                 aes(x = 0, y = 0, xend = xend, yend = yend),
+                 arrow     = arrow(length = unit(0.22, "cm"), type = "closed"),
+                 colour    = "black", linewidth = 0.75, linejoin = "mitre") +
+    geom_text(data = ld_e,
+              aes(x = xend * 1.13, y = yend * 1.13, label = label),
+              size = 3.6, fontface = "bold", colour = "black") +
+    labs(
+      title   = e,
+      x       = paste0("PC1  (", pve_e[1], "% variance explained)"),
+      y       = paste0("PC2  (", pve_e[2], "% variance explained)"),
+      caption = paste0("n = ", nrow(df_e), " observations with complete ag + MQ data.")
+    ) +
+    theme(
+      plot.title       = element_text(size = 14, face = "bold", hjust = 0.5),
+      axis.title       = element_text(size = 12, face = "bold"),
+      axis.text        = element_text(size = 10),
+      panel.grid.minor = element_blank(),
+      plot.caption     = element_text(size = 9, colour = "grey50")
+    )
+
+  print(p_e)
+}
+```
+
+
+
+
 
 
 

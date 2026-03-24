@@ -38,14 +38,14 @@ library(stringr)
 
 ```{r setup, include=FALSE}
 base_path <- if (.Platform$OS.type == "windows") {
-  "C:/Users/Siim Sepp/NY_WMB/analysis"
+  "C:/Users/Siim Sepp/NY_WMBCL"
 } else {
-  "~/Documents/GitHub/NY_WMB/analysis"
+  "~/Documents/GitHub/NY_WMB"
 }
 
 load(file.path(base_path, "data/data_ag.Rdata"))
 load(file.path(base_path, "data/data_mq.Rdata"))
-load(file.path(base_path, "data/VI_mat.Rdata"))
+load(file.path(base_path, "data/VImat.Rdata"))
 ```
 
 
@@ -208,7 +208,7 @@ data_mq<- data_mq%>%
   pivot_longer(cols = all_of(traits_mq), names_to = "VI", values_to = "Predicted")
 
 #prepare agronomic BLUE traits
-load("data/ag_BLUE_spatial.RData")
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
 
 data_ag_pr <- preds[,-5] %>% filter(VI %in% traits_ag )%>% pivot_wider(names_from = "VI", values_from = "Predicted")
 
@@ -228,7 +228,7 @@ data_ag_pr <- preds[,-5] %>% filter(VI %in% traits_ag )%>% pivot_wider(names_fro
 PP_LM_results_ag_raw  <- run_pheno_models_long(data_ag, VImats, model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 50)
 
 #hist(PP_LM_results_ag_raw$accuracy$Accuracy)
-save(PP_LM_results_ag_raw, file= "PP_LM_results_ag_raw.Rdata")
+save(PP_LM_results_ag_raw, file = file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
 #table(PP_LM_results_ag_raw$accuracy$Environment, PP_LM_results_ag_raw$accuracy$Trait)
 #boxplot(PP_LM_results_ag_raw$accuracy$Accuracy~ PP_LM_results_ag_raw$accuracy$Trait)
 ```
@@ -241,7 +241,7 @@ save(PP_LM_results_ag_raw, file= "PP_LM_results_ag_raw.Rdata")
 ```{r}
 PP_LM_results_mq_raw  <- run_pheno_models_long(data_mq, VImats[c(1,3)], model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 50)
 
-save(PP_LM_results_mq_raw, file= "PP_LM_results_mq_raw.Rdata")
+save(PP_LM_results_mq_raw, file = file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
 ```
 
 
@@ -251,8 +251,7 @@ save(PP_LM_results_mq_raw, file= "PP_LM_results_mq_raw.Rdata")
 
 ```{r}
 # Define parameters
-load("~/data/VImatBLUE.Rdata")
-#load("C:/Users/Siim Sepp/NY_WMB/data/VImatBLUE.Rdata")
+load(file.path(base_path, "data/VImatBLUE.Rdata"))
 VIs<- names(VImats$KET21)[-3]
 
 cycles <- 50
@@ -290,13 +289,15 @@ for (env_idx in names(VImats)) {
       cols <- c("S.T", colnames(predictor_data)[-1])
       cols <- cols[cols %in% colnames(merged_data)]
       merged_data <- merged_data[, cols]
-      
+      merged_data <- merged_data %>% na.omit()
+      if (nrow(merged_data) < 10) next
+
       for (r in 1:cycles) {
         set.seed(r)
-        
+
         ind <- createDataPartition(merged_data$S.T, p = 0.8, list = FALSE)
-        train <- merged_data[ind, ]  
-        test  <- merged_data[-ind, ] 
+        train <- merged_data[ind, ]
+        test  <- merged_data[-ind, ]
         
         # Pre-clean predictors
         nzv <- nearZeroVar(train, saveMetrics = TRUE)
@@ -452,8 +453,8 @@ accuracy_results <- do.call(rbind, accuracy_list)
 var_importance_results <- do.call(rbind, var_importance_list)
 prediction_results <- do.call(rbind, prediction_list)
 
-PP_LM_results_ag_pred <- list(accuracy_results, var_importance_results, prediction_results) 
-save(PP_LM_results_ag_pred, file= "PP_LM_results_ag_pred.Rdata")
+PP_LM_results_ag_pred <- list(accuracy_results, var_importance_results, prediction_results)
+save(PP_LM_results_ag_pred, file = file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
 ```
 
 
@@ -463,8 +464,7 @@ save(PP_LM_results_ag_pred, file= "PP_LM_results_ag_pred.Rdata")
 
 ```{r}
 # Define parameters
-#load("~/data/VImatBLUE.Rdata")
-load("C:/Users/Siim Sepp/NY_WMB/data/VImatBLUE.Rdata")
+load(file.path(base_path, "data/VImatBLUE.Rdata"))
 
 cycles <- 5
 
@@ -502,7 +502,9 @@ for (env_idx in names(VImats)[4]) {
       cols <- c("ST", colnames(predictor_data)[-1])
       cols <- cols[cols %in% colnames(merged_data)]
       merged_data <- merged_data[, cols]
-      
+      merged_data <- merged_data %>% na.omit()
+      if (nrow(merged_data) < 10) next
+
       for (r in 1:cycles) {
         set.seed(r)
         
@@ -524,17 +526,17 @@ for (env_idx in names(VImats)[4]) {
             for (alpha_val in c(0, 0.5, 1)) {
               model <- tryCatch(
                 train(
-                  S.T ~ ., data = train, method = "glmnet",
+                  ST ~ ., data = train, method = "glmnet",
                   tuneGrid = expand.grid(alpha = alpha_val,
                                          lambda = seq(0.0001, 1, length = 10)),
                   trControl = custom
                 ),
                 error = function(e) NULL
               )
-              
+
               if (!is.null(model)) {
                 model_pred <- tryCatch(predict(model, test), error = function(e) rep(NA, nrow(test)))
-                
+
                 if (!all(is.na(model_pred))) {
                   model_acc <- cor(model_pred, test$ST, use = "complete.obs")
                 } else {
@@ -664,8 +666,8 @@ accuracy_results <- do.call(rbind, accuracy_list)
 var_importance_results <- do.call(rbind, var_importance_list)
 prediction_results <- do.call(rbind, prediction_list)
 
-PP_LM_results_mq_pred <- list(accuracy_results, var_importance_results, prediction_results) 
-save(PP_LM_results_mq_pred, file= "PP_LM_results_mq_pred.Rdata")
+PP_LM_results_mq_pred <- list(accuracy_results, var_importance_results, prediction_results)
+save(PP_LM_results_mq_pred, file = file.path(base_path, "output/PP_LM_results_mq_pred.Rdata"))
 ```
 
 
@@ -677,12 +679,10 @@ save(PP_LM_results_mq_pred, file= "PP_LM_results_mq_pred.Rdata")
 
 **Ordering and cleaning the var importance scores**
 ```{r}
-#load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_var_importance_scores_ag.RData")
-load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_ag_pred.RData")
-
-load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_mq_pred.RData")
-load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_mq_raw.Rdata")
-load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_ag_raw.Rdata")
+load(file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
+load(file.path(base_path, "output/PP_LM_results_mq_pred.Rdata"))
+load(file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
+load(file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
 
 PP_LM_results_ag_raw$importance$met<- "raw" 
 PP_LM_results_mq_raw$importance$met<- "raw" 
@@ -747,7 +747,7 @@ var_importance_results <- var_importance_results %>%
 **Plotting Smooth varimp scores over envs, models, VIs and traits. **
 ```{r}
 
-load("C:/Users/Siim Sepp/NY_WMB/JD_map.Rdata")
+load(file.path(base_path, "JD_map.Rdata"))
 colnames(var_importance_results)[6]<- "Timepoint"
 
 var_importance_results<- var_importance_results %>% left_join(JD_map, by= c("Environment", "Timepoint"))
@@ -904,13 +904,17 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
       }
       
       df <- df %>% filter(plotID %in% common_gids)
+      # Remove observations with missing phenotype before fold creation
+      df <- df[!is.na(df$Predicted), , drop = FALSE]
+      if (nrow(df) < 10) {
+        cat("    Too few non-missing observations. Skipping.\n")
+        next
+      }
       df$plotID <- factor(df$plotID, levels = common_gids)
       K <- K[common_gids, common_gids]
 
-
-      
       all_cv_cor <- c()
-      
+
       for (rep in 1:n_repeats) {
         set.seed(100 + rep)
         folds <- createFolds(df$Predicted, k = 5)
@@ -942,7 +946,12 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
           }, error = function(e) return(NULL))
           
           if (is.null(mod_cv)) next
-          
+
+          # Run one update if model did not converge
+          if (!mod_cv$converge) {
+            mod_cv <- tryCatch(update(mod_cv), error = function(e) mod_cv)
+          }
+
           pred <- tryCatch({
             predict(mod_cv, classify = "plotID")
           }, error = function(e) return(NULL))
@@ -1008,11 +1017,11 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
 
 **Prepare Similarity matrices and pheno data for the MM function**
 ```{r}
-load("data/ag_BLUE_spatial.RData")
-preds_ag<- preds
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+preds_ag <- preds
 
 #prep pred mat for combined and sel VIs
-load("data/MT_pred_mat.Rdata")
+load(file.path(base_path, "data/MT_pred_mat.Rdata"))
 
 names(MT_sim_mat_pr)
 MT_sim_mat_pr_comb <- MT_sim_mat_pr[6:10]
@@ -1022,7 +1031,7 @@ MT_sim_mat_pr_sel <- MT_sim_mat_pr[c(4,1,3,5,2)]
 names(MT_sim_mat_pr_sel)<- c("MCG25","HELF24", "MCG23","SNY22", "KET21")
 
 #prep raw mat for combined and sel VIs
-load("data/MT_raw_mat.Rdata")
+load(file.path(base_path, "data/MT_raw_mat.Rdata"))
 
 names(MT_sim_mat_raw)
 
@@ -1044,7 +1053,7 @@ tr<- unique(preds$VI)[-2:-3]
 preds_ag<- preds_ag %>% filter(VI %in% tr)
 
 PP_MM_results_ag_pred_comb <- run_blup_cv(preds_ag, MT_sim_mat_pr_comb)
-save(PP_MM_results_ag_pred_comb, file = "PP_MM_results_ag_pred_comb.Rdata")
+save(PP_MM_results_ag_pred_comb, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb.Rdata"))
 ```
 
 
@@ -1055,7 +1064,7 @@ save(PP_MM_results_ag_pred_comb, file = "PP_MM_results_ag_pred_comb.Rdata")
 ```{r}
 PP_MM_results_ag_pred_sel <- run_blup_cv(preds_ag, MT_sim_mat_pr_sel)
 
-save(PP_MM_results_ag_pred_sel, file = "PP_MM_results_ag_pred_sel.Rdata")
+save(PP_MM_results_ag_pred_sel, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel.Rdata"))
 ```
 
 
@@ -1064,15 +1073,15 @@ save(PP_MM_results_ag_pred_sel, file = "PP_MM_results_ag_pred_sel.Rdata")
 #**PP within env VIs for agronomic traits with RAW comb**
 
 ```{r}
-load("C:/Users/Siim Sepp/NY_WMB/data/data_ag.Rdata")
+load(file.path(base_path, "data/data_ag.Rdata"))
 
-tr<- colnames(data_ag)[c(7,8)]
+tr <- colnames(data_ag)[c(7,8)]
 
 data_ag<- data_ag[,c(-2,-4,-9,-10)] %>% pivot_longer(values_to = "Predicted", names_to = "VI", cols = tr)
 
 PP_MM_results_ag_raw_comb <- run_blup_cv(data_ag, MT_sim_mat_raw_comb)
 
-save(PP_MM_results_ag_raw_comb, file = "PP_MM_results_ag_raw_comb.Rdata")
+save(PP_MM_results_ag_raw_comb, file = file.path(base_path, "output/PP_MM_results_ag_raw_comb.Rdata"))
 ```
 
 
@@ -1082,7 +1091,7 @@ save(PP_MM_results_ag_raw_comb, file = "PP_MM_results_ag_raw_comb.Rdata")
 
 ```{r}
 PP_MM_results_ag_raw_sel <- run_blup_cv(data_ag, MT_sim_mat_raw_sel)
-save(PP_MM_results_ag_raw_sel, file = "PP_MM_results_ag_raw_sel.Rdata")
+save(PP_MM_results_ag_raw_sel, file = file.path(base_path, "output/PP_MM_results_ag_raw_sel.Rdata"))
 ```
 
 
@@ -1091,13 +1100,13 @@ save(PP_MM_results_ag_raw_sel, file = "PP_MM_results_ag_raw_sel.Rdata")
 **PP within env  VIs for MQ traits with RAW comb**
 
 ```{r}
-load("C:/Users/Siim Sepp/NY_WMB/data/data_mq.Rdata")
+load(file.path(base_path, "data/data_mq.Rdata"))
 
-tr<- colnames(data_mq)[4:15]
+tr <- colnames(data_mq)[4:15]
 data_mq<- data_mq %>% pivot_longer(values_to = "Predicted", names_to = "VI", cols = tr)
 
 PP_MM_results_MQ_raw_comb <- run_blup_cv(data_mq, MT_sim_mat_raw_comb)
-save(PP_MM_results_MQ_raw_comb, file = "PP_MM_results_MQ_raw_comb.Rdata")
+save(PP_MM_results_MQ_raw_comb, file = file.path(base_path, "output/PP_MM_results_MQ_raw_comb.Rdata"))
 ```
 
 
@@ -1107,7 +1116,7 @@ save(PP_MM_results_MQ_raw_comb, file = "PP_MM_results_MQ_raw_comb.Rdata")
 
 ```{r}
 PP_MM_results_MQ_raw_sel <- run_blup_cv(data_mq, MT_sim_mat_raw_sel)
-save(PP_MM_results_MQ_raw_sel, file = "PP_MM_results_MQ_raw_sel.Rdata")
+save(PP_MM_results_MQ_raw_sel, file = file.path(base_path, "output/PP_MM_results_MQ_raw_sel.Rdata"))
 
 
 #PP_MM_results_MQ_pred_sel <- run_blup_cv(preds, MT_sim_mat_pr_sel)
@@ -1298,6 +1307,13 @@ run_blup_cv2_phenoK_globalK <- function(preds, MT_sim_mat,
 
         out <- merge(test_rows, pred[, c("plotID", "u_hat")], by = "plotID", all.x = TRUE)
 
+        # u_hat is per GID (same value for all envs of that GID).  Aggregate
+        # phenotypes to GID level so the correlation is at the genotype level —
+        # the valid CV metric when predictions are genotype-level BVs.
+        out_pheno <- aggregate(Predicted ~ plotID, data = out, FUN = mean, na.rm = TRUE)
+        out_bv    <- out[!duplicated(out$plotID), c("plotID", "u_hat")]
+        out       <- merge(out_pheno, out_bv, by = "plotID")
+
         results <- rbind(results, data.frame(
           Trait  = trait,
           RepRun = rep,
@@ -1330,7 +1346,7 @@ cv2_global_f1 <- run_blup_cv2_phenoK_globalK(
 
 boxplot(cv2_global_f1$results$Cor)
 PP_MM_results_ag_pred_comb_CV2_f1 <- cv2_global_f1
-save(PP_MM_results_ag_pred_comb_CV2_f1, file = "PP_MM_results_ag_pred_comb_CV2_f1.Rdata")
+save(PP_MM_results_ag_pred_comb_CV2_f1, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb_CV2_f1.Rdata"))
 ```
 
 
@@ -1342,7 +1358,7 @@ cv2_global_f05 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 0.5 )
 
 PP_MM_results_ag_pred_comb_CV2_f05 <- cv2_global_f05
-save(PP_MM_results_ag_pred_comb_CV2_f05, file = "PP_MM_results_ag_pred_comb_CV2_f05.Rdata")
+save(PP_MM_results_ag_pred_comb_CV2_f05, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb_CV2_f05.Rdata"))
 ```
 
 
@@ -1354,7 +1370,7 @@ cv2_global_f1 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 1 )
 
 PP_MM_results_ag_pred_sel_CV2_f1 <- cv2_global_f1
-save(PP_MM_results_ag_pred_sel_CV2_f1, file = "PP_MM_results_ag_pred_sel_CV2_f1.Rdata")
+save(PP_MM_results_ag_pred_sel_CV2_f1, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel_CV2_f1.Rdata"))
 ```
 
 
@@ -1366,6 +1382,6 @@ cv2_global_f05 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 0.5 )
 
 PP_MM_results_ag_pred_sel_CV2_f05 <- cv2_global_f05
-save(PP_MM_results_ag_pred_sel_CV2_f05, file = "PP_MM_results_ag_pred_sel_CV2_f05.Rdata")
+save(PP_MM_results_ag_pred_sel_CV2_f05, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel_CV2_f05.Rdata"))
 ```
 
