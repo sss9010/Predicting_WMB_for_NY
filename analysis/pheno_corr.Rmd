@@ -241,6 +241,18 @@ cors_agmq_pooled <- cors_agmq_pooled %>%
   mutate(y_trait = recode(y_trait, !!!trait_map)) 
 
 plot_heatmap(cors_agmq_pooled, title = "ag × mq — pooled over environments")
+
+
+corm<- as.matrix(cor(agmq[,4:18]))
+
+library(tibble)
+corm <- corm %>%
+  as.data.frame() %>%
+  rownames_to_column("Trait") %>%
+  mutate(Trait = recode(Trait, !!!trait_map)) %>%
+  column_to_rownames("Trait")
+
+colnames(corm) <- recode(colnames(corm), !!!trait_map)
 ```
 
 ### 3.2 Within environment
@@ -253,14 +265,6 @@ plot_heatmap(cors_agmq_env, facet_col = "Env",
              title = "ag × mq — within environment")
 
 
-agmq1<- agmq %>% filter(Env== "MCG23")
-ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
-
-agmq1<- agmq %>% filter(Env== "HELF24")
-ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
-
-agmq1<- agmq %>% filter(Env== "MCG25")
-ASRgenomics::kinship.heatmap(as.matrix(cor(agmq1[,4:18])))
 ```
 
 ### 3.3 Clustered heatmap (pooled)
@@ -278,7 +282,9 @@ cor_mat <- cors_agmq_pooled %>%
   tibble::column_to_rownames("x_trait") %>%
   as.matrix()
 
-pheatmap(cor_mat,
+
+
+pheatmap(corm,
          color            = colorRampPalette(c("#2c7bb6", "white", "#d7191c"))(100),
          breaks           = seq(-1, 1, length.out = 101),
          cluster_rows     = TRUE,
@@ -287,10 +293,9 @@ pheatmap(cor_mat,
          display_numbers  = TRUE,
          number_format    = "%.2f",
          number_color     = "black",
-         fontsize_number  = 11,
-         fontsize_row     = 13,
-         fontsize_col     = 13,
-         main             = "ag × mq — pooled (clustered)",
+         fontsize_number  = 13,
+         fontsize_row     = 14,
+         fontsize_col     = 14,
          border_color     = "grey90",
          treeheight_row   = 35,
          treeheight_col   = 35,

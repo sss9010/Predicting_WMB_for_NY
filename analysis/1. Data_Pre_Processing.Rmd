@@ -199,27 +199,29 @@ head(WinterPCA_annot[, c("GID","PC1","PC2","fam")])
 library(ggplot2)
 
 ggplot(WinterPCA_annot, aes(x = PC1, y = PC2)) +
-  # black, large points for Parents
   geom_point(
     data = subset(WinterPCA_annot, fam == "Parent"),
-    color = "black", size = 4, alpha = 0.9
+    color = "black", size = 3.5, alpha = 0.9
   ) +
-  # colored points for all others
   geom_point(
     data = subset(WinterPCA_annot, fam != "Parent"),
-    aes(color = fam), size = 2.5, alpha = 0.8
+    aes(color = fam), size = 3.5, alpha = 0.8
   ) +
+  scale_color_brewer(palette = "Set3") +
   labs(
-    x = sprintf("PC1 (%.1f%% PVE)", 100 * WinterPVEPCA[1]),
-    y = sprintf("PC2 (%.1f%% PVE)", 100 * WinterPVEPCA[2]),
+    x = sprintf("PC1 (%.1f%%)", 100 * WinterPVEPCA[1]),
+    y = sprintf("PC2 (%.1f%%)", 100 * WinterPVEPCA[2]),
     color = "Family"
   ) +
-  #theme_minimal(base_size = 13) +
-  theme(legend.position = "bottom")
+  theme(axis.text =  element_text(size= 16), legend.position = "bottom", legend.text = element_text(size= 8))
+
+
 table(WinterPCA_annot$fam)
 table(fam_map$Fam)
 
-A1<- D1$G
+
+
+#A1<- D1$G
 ASRgenomics::kinship.heatmap(A1)
 ```
 
