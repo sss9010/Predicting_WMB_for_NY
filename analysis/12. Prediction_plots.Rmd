@@ -31,9 +31,9 @@ Load files
 #LM, RF, EN, LASSO, 
 # Define the base path - you can set this depending on your OS
 base_path <- if (.Platform$OS.type == "windows") {
-  "C:/Users/Siim Sepp/NY_WMB/analysis"
+  "C:/Users/Siim Sepp/NY_WMBCL/output"
 } else {
-  "~/Documents/GitHub/NY_WMB/analysis"
+  "~/Documents/GitHub/NY_WMBCL/output"
 }
 
 # Load files with constructed paths
@@ -42,14 +42,14 @@ load(file.path(base_path, "PP_LM_results_ag_raw.Rdata"))
 load(file.path(base_path, "PP_LM_results_mq_raw.Rdata"))
 
 # PP MM
-load(file.path(base_path, "PP_MM_results_ag_pred_comb.Rdata"))
-load(file.path(base_path, "PP_MM_results_ag_pred_sel.Rdata"))
-load(file.path(base_path, "PP_MM_results_ag_raw_comb.Rdata"))
-load(file.path(base_path, "PP_MM_results_ag_raw_sel.Rdata"))
-load(file.path(base_path, "PP_MM_results_MQ_pred_comb.Rdata"))
-load(file.path(base_path, "PP_MM_results_MQ_pred_sel.Rdata"))
-load(file.path(base_path, "PP_MM_results_MQ_raw_comb.Rdata"))
-load(file.path(base_path, "PP_MM_results_MQ_raw_sel.Rdata"))
+load(file.path(base_path, "PP_MM_results_ag_pred_comb.Rdata"))#
+load(file.path(base_path, "PP_MM_results_ag_pred_sel.Rdata"))#
+load(file.path(base_path, "PP_MM_results_ag_raw_comb.Rdata"))#
+load(file.path(base_path, "PP_MM_results_ag_raw_sel.Rdata"))#
+load(file.path(base_path, "PP_MM_results_MQ_pred_comb.Rdata"))#
+load(file.path(base_path, "PP_MM_results_MQ_pred_sel.Rdata"))#
+load(file.path(base_path, "PP_MM_results_MQ_raw_comb.Rdata"))#
+load(file.path(base_path, "PP_MM_results_MQ_raw_sel.Rdata"))#
 
 # GBLUP GP
 load(file.path(base_path, "GP_MM_results_ag_pred.Rdata"))
