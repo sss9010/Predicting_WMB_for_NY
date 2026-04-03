@@ -46,31 +46,31 @@ load(file.path(base_path, "PP_MM_results_ag_pred_comb.Rdata"))#
 load(file.path(base_path, "PP_MM_results_ag_pred_sel.Rdata"))#
 load(file.path(base_path, "PP_MM_results_ag_raw_comb.Rdata"))#
 load(file.path(base_path, "PP_MM_results_ag_raw_sel.Rdata"))#
-load(file.path(base_path, "PP_MM_results_MQ_pred_comb.Rdata"))#
-load(file.path(base_path, "PP_MM_results_MQ_pred_sel.Rdata"))#
+#load(file.path(base_path, "PP_MM_results_MQ_pred_comb.Rdata"))#
+#load(file.path(base_path, "PP_MM_results_MQ_pred_sel.Rdata"))#
 load(file.path(base_path, "PP_MM_results_MQ_raw_comb.Rdata"))#
 load(file.path(base_path, "PP_MM_results_MQ_raw_sel.Rdata"))#
 
 # GBLUP GP
 load(file.path(base_path, "GP_MM_results_ag_pred.Rdata"))
 load(file.path(base_path, "GP_MM_results_ag_raw.Rdata"))
-load(file.path(base_path, "GP_MM_results_mq_preds.Rdata"))
+#load(file.path(base_path, "GP_MM_results_mq_preds.Rdata"))
 load(file.path(base_path, "GP_MM_results_mq_raw.Rdata"))
 
 # MT GP
-load(file.path(base_path, "MT_mq_res_raw.Rdata"))
-load(file.path(base_path, "MT_ag_res_raw.Rdata"))
+load(file.path(base_path, "MT_mq_res_raw_sp.Rdata"))
+load(file.path(base_path, "MT_ag_res_raw_sp.Rdata"))
 
 # double kernel GP
-load(file.path(base_path, "GP_DK_results_ag_pr_c.Rdata"))
-load(file.path(base_path, "GP_DK_results_ag_pr_sel.Rdata"))
-load(file.path(base_path, "GP_DK_results_ag_raw_c.Rdata"))
+load(file.path(base_path, "GP_DK_results_ag_pr.Rdata"))
+#load(file.path(base_path, "GP_DK_results_ag_pr_sel.Rdata"))
+#load(file.path(base_path, "GP_DK_results_ag_raw.Rdata"))
 load(file.path(base_path, "GP_DK_results_ag_raw_sel.Rdata"))
-load(file.path(base_path, "GP_DK_results_mq_raw_c.Rdata"))
 load(file.path(base_path, "GP_DK_results_mq_raw_sel.Rdata"))
-load(file.path(base_path, "GP_DK_results_mq_pr_c.Rdata"))
-load(file.path(base_path, "GP_DK_results_mq_pr_sel.Rdata"))
-
+#load(file.path(base_path, "GP_DK_results_mq_raw_sel.Rdata"))
+#load(file.path(base_path, "GP_DK_results_mq_pr_c.Rdata"))
+#load(file.path(base_path, "GP_DK_results_mq_pr_sel.Rdata"))
+table(MT_ag_res_raw_sp$failures$Cor_Trait, MT_ag_res_raw_sp$failures$Trait)
 
 ```
 
@@ -106,20 +106,20 @@ PP_MM_results_MQ_raw_sel$mod   <- "MM"
 PP_MM_results_MQ_raw_comb$sel  <- "comb"
 PP_MM_results_MQ_raw_sel$sel   <- "sel"
 
-PP_MM_results_MQ_pred_comb$met <- "MM_mq_pred_comb"
-PP_MM_results_MQ_pred_sel$met  <- "MM_mq_pred_sel"
-PP_MM_results_MQ_pred_comb$BLUE<- "Two"
-PP_MM_results_MQ_pred_sel$BLUE <- "Two"
-PP_MM_results_MQ_pred_comb$mod <- "MM"
-PP_MM_results_MQ_pred_sel$mod  <- "MM"
-PP_MM_results_MQ_pred_comb$sel <- "comb"
-PP_MM_results_MQ_pred_sel$sel  <- "sel"
+#PP_MM_results_MQ_pred_comb$met <- "MM_mq_pred_comb"
+#PP_MM_results_MQ_pred_sel$met  <- "MM_mq_pred_sel"
+#PP_MM_results_MQ_pred_comb$BLUE<- "Two"
+#PP_MM_results_MQ_pred_sel$BLUE <- "Two"
+#PP_MM_results_MQ_pred_comb$mod <- "MM"
+#PP_MM_results_MQ_pred_sel$mod  <- "MM"
+#PP_MM_results_MQ_pred_comb$sel <- "comb"
+#PP_MM_results_MQ_pred_sel$sel  <- "sel"
 
 #PP_MM_results_ag_pred_sel<- PP_MM_results_ag_pred_sel[,-3]
 
 
 
-PP_MM_master<- rbind(PP_MM_results_ag_pred_sel, PP_MM_results_ag_pred_comb,  PP_MM_results_ag_raw_comb,PP_MM_results_ag_raw_sel, PP_MM_results_MQ_pred_comb, PP_MM_results_MQ_pred_sel, PP_MM_results_MQ_raw_comb, PP_MM_results_MQ_raw_sel)
+PP_MM_master<- rbind(PP_MM_results_ag_pred_sel, PP_MM_results_ag_pred_comb,  PP_MM_results_ag_raw_comb,PP_MM_results_ag_raw_sel,  PP_MM_results_MQ_raw_comb, PP_MM_results_MQ_raw_sel)#, PP_MM_results_MQ_pred_comb) PP_MM_results_MQ_pred_sel,
 ```
 
 
@@ -243,22 +243,23 @@ table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
 GP_MM_results_ag_pred$results$BLUE<- "Two"
 GP_MM_results_ag_raw$results$BLUE<- "One"
 GP_MM_results_mq_raw$results$BLUE<- "One"
-GP_MM_results_mq_preds$results$BLUE<- "Two"
+#GP_MM_results_mq_preds$results$BLUE<- "Two"
 
 GP_MM_results_ag_pred$results$met <- "GP"
 GP_MM_results_ag_raw$results$met <- "GP"
 GP_MM_results_mq_raw$results$met <- "GP"
-GP_MM_results_mq_preds$results$met <- "GP"
+#GP_MM_results_mq_preds$results$met <- "GP"
 
 
 colnames(GP_MM_results_ag_pred$results)
-colnames(GP_MM_results_mq_preds$results)
+#colnames(GP_MM_results_mq_preds$results)
 colnames(GP_MM_results_ag_raw$results)
 colnames(GP_MM_results_mq_raw$results)
-colnames(GP_MM_results_ag_pred$results)[5]<- "Cor"
-colnames(GP_MM_results_mq_preds$results)[5]<- "Cor"
+colnames(GP_MM_results_ag_pred$results)
+#colnames(GP_MM_results_mq_preds$results)[5]<- "Cor"
 
-GP_MM_master <- rbind(GP_MM_results_ag_pred$results$, GP_MM_results_ag_raw$results[,-5], GP_MM_results_mq_raw$results[,-5], GP_MM_results_mq_preds$results$)
+GP_MM_master <- rbind(GP_MM_results_ag_pred$results[,-5], GP_MM_results_ag_raw$results[,-5], GP_MM_results_mq_raw$results[,-5])#, #GP_MM_results_mq_preds$results$)
+
 
 
 unique(GP_MM_master$Trait)
@@ -277,7 +278,7 @@ GP_MM_master$type<- NA
 
 **Merge MT GP**
 ```{r}
-MT_res_raw<- rbind(MT_ag_res_raw$results, MT_mq_res_raw$results)
+MT_res_raw<- rbind(MT_ag_res_raw_sp$results, MT_mq_res_raw_sp$results)
 MT_res_raw<- MT_res_raw[-4:-5]
 MT_res_raw$BLUE<- "One"
 MT_res_raw$type<- NA
@@ -287,32 +288,32 @@ MT_res_raw$met<- "MT"
 
 **merge DK GP**
 ```{r}
-GP_DK_results_ag_pr_c$results$type<- "comb"
-GP_DK_results_ag_pr_sel$results$type<- "sel"
-GP_DK_results_ag_raw_c$results$type<- "comb"
+#GP_DK_results_ag_pr$results$type<- "comb"
+GP_DK_results_ag_pr$results$type<- "sel"
+#GP_DK_results_ag_raw_c$results$type<- "comb"
 GP_DK_results_ag_raw_sel$results$type<- "sel"
 
-GP_DK_results_mq_pr_c$results$type<- "comb"
-GP_DK_results_mq_pr_sel$results$type<- "sel"
-GP_DK_results_mq_raw_c$results$type<- "comb"
+#GP_DK_results_mq_pr_c$results$type<- "comb"
+#GP_DK_results_mq_pr_sel$results$type<- "sel"
+#GP_DK_results_mq_raw_c$results$type<- "comb"
 GP_DK_results_mq_raw_sel$results$type<- "sel"
 
 #failers
-GP_DK_results_ag_pr_c$failures$type<- "comb"
-GP_DK_results_ag_pr_sel$failures$type<- "sel"
-GP_DK_results_ag_raw_c$failures$type<- "comb"
-GP_DK_results_ag_raw_sel$failures$type<- "sel"
+#GP_DK_results_ag_pr_c$failures$type<- "comb"
+#GP_DK_results_ag_pr_sel$failures$type<- "sel"
+#GP_DK_results_ag_raw_c$failures$type<- "comb"
+#GP_DK_results_ag_raw_sel$failures$type<- "sel"
 
-GP_DK_results_mq_pr_c$failures$type<- "comb"
-GP_DK_results_mq_pr_sel$failures$type<- "sel"
+#GP_DK_results_mq_pr_c$failures$type<- "comb"
+#GP_DK_results_mq_pr_sel$failures$type<- "sel"
 
 
-GP_DK_res<- rbind(GP_DK_results_ag_pr_c$results, GP_DK_results_ag_pr_sel$results, GP_DK_results_ag_raw_c$results, GP_DK_results_ag_raw_sel$results, GP_DK_results_mq_pr_c$results, GP_DK_results_mq_pr_sel$results, GP_DK_results_mq_raw_c$results, GP_DK_results_mq_raw_sel$results)
+GP_DK_res<- rbind(GP_DK_results_ag_pr$results,  GP_DK_results_ag_raw_sel$results,  GP_DK_results_mq_raw_sel$results)#, GP_DK_results_mq_pr_sel$results, GP_DK_results_mq_raw_c$results,GP_DK_results_ag_pr_c$results, GP_DK_results_ag_raw_c$results, GP_DK_results_mq_pr_c$results,)
 
-GP_DK_fail<- rbind(GP_DK_results_ag_pr_c$failures, GP_DK_results_ag_pr_sel$failures, GP_DK_results_ag_raw_c$failures, GP_DK_results_ag_raw_sel$failures, GP_DK_results_mq_pr_c$failures, GP_DK_results_mq_pr_sel$failures)
+#GP_DK_fail<- rbind(GP_DK_results_ag_pr_c$failures, GP_DK_results_ag_pr_sel$failures, GP_DK_results_ag_raw_c$failures, GP_DK_results_ag_raw_sel$failures, GP_DK_results_mq_pr_c$failures, GP_DK_results_mq_pr_sel$failures)
 
 GP_DK_res<- GP_DK_res %>% filter(!Trait == "BarleyColor.Agtron.") %>% filter(!Trait == "WortClarity")
-
+colnames(GP_DK_res)
 GP_DK_res <- GP_DK_res[c(2,3,6,10)]
 GP_DK_res$met<- "DK"
 GP_DK_res$BLUE<- "One"
@@ -325,6 +326,10 @@ GP_DK_res$Cor_Trait<- NA
 ```{r}
 GP_DK_res<- GP_DK_res %>% filter(type== "comb")
 GP_res<- rbind(GP_DK_res, GP_MM_master, MT_res_raw)
+
+colnames(GP_DK_res)
+colnames(GP_MM_master)
+colnames(MT_res_raw)
 
 GP_res <- GP_res %>%
   mutate(Trait = recode(Trait, !!!trait_map))

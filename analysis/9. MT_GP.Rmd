@@ -155,6 +155,7 @@ MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[, -2], by = c("plot_id"))
 
 
 ```{r}
+
 safe_cor <- function(x, y) {
   ok <- stats::complete.cases(x, y)
   if (sum(ok) < 2L) return(NA_real_)
@@ -217,6 +218,10 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
             data.frame(GID = df_cv$GID, Row = df_cv$Row, Column = df_cv$Column,
                        trait = j, value = df_cv[[j]], units = df_cv$units)
           )
+          # Align GID factor levels to Ginv row names — do NOT subset Ginv;
+          # bracket-subsetting an ASRgenomics sparse inverse drops ASReml
+          # attributes and causes the "unexpected size for dense matrix based G" error.
+          df_long$GID <- factor(as.character(df_long$GID), levels = rownames(Ginv))
           df_long$trait <- factor(df_long$trait, levels = c(i, j))
           df_long$fold  <- rep(fold_ids, times = 2)
 
@@ -231,14 +236,17 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
 
           # Random & residual
           if (spatial) {
-            rand_formula <- ~ vm(GID, Ginv):corgh(trait)
-            res_formula  <- ~ ar1(Row):ar1(Column):units
+            rand_formula <- ~ vm(GID, Ginv):corgh(trait) + ar1(Row):ar1(Column)
+            res_formula  <- ~ idv(units)
+            df_long$Row<- as.factor(df_long$Row)
+            df_long$Column<- as.factor(df_long$Column)
           } else {
             rand_formula <- ~ vm(GID, Ginv):corgh(trait)
             res_formula  <- ~ idv(units)
           }
 
           # Fit
+          
           mod_cv <- tryCatch({
             asreml(
               fixed     = value ~ trait,
@@ -246,7 +254,7 @@ run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
               residual  = res_formula,
               data      = df_long,
               na.action = list(x = "include", y = "include"),
-              workspace = 1e8,
+              workspace = 7e8,
               maxit     = 100,
               ai.sing   = TRUE,
               trace     = FALSE
@@ -403,7 +411,7 @@ MT_ag_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
   envs       = envs,
   traits     = agtraits,
   cor_traits = cor_traits,
-  reps = 50, folds = 5,
+  reps = 1, folds = 5,
   spatial = TRUE,
   mask = "j_only"
 )
