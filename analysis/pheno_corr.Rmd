@@ -543,7 +543,8 @@ load("JD_map.Rdata")
 
 
 colnames(JD_map)[6] <- "Env"
-crsp1 <- cors_sp_env_tp %>% filter(x_trait %in% ag_traits) %>%   mutate(x_trait = recode(x_trait, !!!trait_map))%>% left_join(JD_map[,-4], by= c("Env", "Timepoint")) %>% mutate(Env = recode(Env, !!!env_order))
+crsp1 <- cors_sp_env_tp %>% filter(x_trait %in% ag_traits) %>%   mutate(x_trait = recode(x_trait, !!!trait_map))%>% left_join(JD_map[,-4], by= c("Env", "Timepoint")) 
+#%>% mutate(Env = recode(Env, !!!env_order))
 
 library(dplyr)
 
@@ -723,7 +724,7 @@ Tables show mean |r|, mean r, SD(r), max |r|, and pair count.
 cor_summary(
   cors_all %>% 
    filter(comparison %in% c("ag×sp", "mq×sp")),
-  group_vars   = c("x_trait","y_trait", "comparison"),
+  group_vars   = c("x_trait"),
   filter_strat = "pooled") %>%
   mutate(x_trait = short_name(x_trait)) %>% 
   arrange(mean_abs_r)%>%
@@ -733,11 +734,30 @@ cor_summary(
 cor_summary(
   cors_all %>% 
    filter(comparison %in% c("ag×sp", "mq×sp")),
-  group_vars   = c("x_trait"),
-  filter_strat = "env") %>%
+  group_vars   = c("x_trait","y_trait"),
+  filter_strat = "pooled") %>%
   mutate(x_trait = short_name(x_trait)) %>% 
   arrange(mean_abs_r)%>%
   knitr::kable(caption = "Mean |r| per agronomic trait — pooled") 
+
+
+cor_summary(
+  cors_all %>% 
+   filter(comparison %in% c("ag×sp", "mq×sp")),
+  group_vars   = c("comparison"),
+  filter_strat = "pooled") %>%
+  arrange(mean_abs_r)%>%
+  knitr::kable(caption = "Mean |r| per agronomic trait — pooled") 
+
+
+cor_summary(
+  cors_all %>% 
+   filter(comparison %in% c("ag×sp", "mq×sp")),
+  group_vars   = c("comparison"),
+  filter_strat = "env") %>%
+  arrange(mean_abs_r)%>%
+  knitr::kable(caption = "Mean |r| per agronomic trait — pooled") 
+
 ```
 
 
@@ -795,32 +815,6 @@ p<- cors_all %>%
 
 print(p, n= 41)
 
-#ag/mq corr with sp. 
-cor_summary(
-  cors_all %>% filter(comparison %in% c("ag×sp", "mq×sp")),
-  group_vars   = c( "comparison"),
-  filter_strat = "pooled"
-) %>%
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
-
-
-#ag/mq corr with sp over env.  
-cor_summary(
-  cors_all %>% filter(comparison %in% c("ag×sp", "mq×sp")),
-  group_vars   = c( "comparison"),
-  filter_strat = "env"
-) %>%
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
-
-#ag/mq corr with pc. 
-cor_summary(
-  cors_all %>% filter(comparison %in% c("ag×sp", "mq×sp")),
-  group_vars   = c("VI_x", "comparison"),
-  filter_strat = "pooled"
-) %>%
-  rename(VI = VI_x) %>%
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
-
 ```
 
 
@@ -834,10 +828,12 @@ cor_summary(
 cor_summary(
   cors_all %>% filter(comparison %in% c("ag×pc", "mq×pc")) %>% 
   filter(y_trait %in% c("FPC1_NDVI", "FPC1_PSRI")),
-  group_vars   = c("x_trait"),
+  group_vars   = c("x_trait", "Env"),
   filter_strat = "env") %>% 
   arrange(mean_abs_r) %>% 
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
+  knitr::kable(caption = "Mean |r| by |r| by FPC1:trait")
+
+
 #fpc2
 cor_summary(
   cors_all %>% filter(comparison %in% c("ag×pc", "mq×pc")) %>% 
@@ -845,7 +841,7 @@ cor_summary(
   group_vars   = c("x_trait"),
   filter_strat = "env") %>% 
   arrange(mean_abs_r) %>% 
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
+  knitr::kable(caption = "Mean |r| by Mean |r| by FPC2:trait")
 
 #fpc3
 cor_summary(
@@ -854,7 +850,7 @@ cor_summary(
   group_vars   = c("x_trait"),
   filter_strat = "env") %>% 
   arrange(mean_abs_r) %>% 
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
+  knitr::kable(caption = "Mean |r| by FPC3:trait")
 
 
 #compare ag vs mq. 
@@ -863,7 +859,7 @@ cor_summary(
   group_vars   = c("comparison"),
   filter_strat = "env") %>% 
   arrange(mean_abs_r) %>% 
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
+  knitr::kable(caption = "Mean |r| by FPC:ag/mq")
 
 
 #compare env-s
@@ -873,7 +869,6 @@ cor_summary(
   group_vars   = c("Env"),
   filter_strat = "env") %>% 
   arrange(mean_abs_r) %>% 
-  knitr::kable(caption = "Mean |r| by VI within pc traits — pooled")
-
+  knitr::kable(caption = "Mean |r| by FPC1:Env ")
 ```
 

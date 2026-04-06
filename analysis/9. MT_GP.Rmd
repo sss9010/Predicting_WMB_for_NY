@@ -411,12 +411,14 @@ MT_ag_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
   envs       = envs,
   traits     = agtraits,
   cor_traits = cor_traits,
-  reps = 1, folds = 5,
+  reps = 50, folds = 5,
   spatial = TRUE,
   mask = "j_only"
 )
 
 save(MT_ag_res_raw_sp, file = file.path(base_path, "output/MT_ag_res_raw_sp.Rdata"))
+
+
 ```
 
 
