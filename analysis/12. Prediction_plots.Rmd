@@ -60,6 +60,7 @@ load(file.path(base_path, "GP_MM_results_mq_raw.Rdata"))
 # MT GP
 load(file.path(base_path, "MT_mq_res_raw_sp.Rdata"))
 load(file.path(base_path, "MT_ag_res_raw_sp.Rdata"))
+load(file.path(base_path, "MT_ag_res_pr.Rdata"))#new
 
 # double kernel GP
 load(file.path(base_path, "GP_DK_results_ag_pr.Rdata"))
@@ -233,7 +234,6 @@ PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
 PP_LM_MM_accuracy <- PP_LM_MM_accuracy %>%
   mutate(Model = ifelse(grepl("Linear", Model), "Lin", Model))
 
-
 table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
 ```
 
@@ -261,7 +261,6 @@ colnames(GP_MM_results_ag_pred$results)
 GP_MM_master <- rbind(GP_MM_results_ag_pred$results[,-5], GP_MM_results_ag_raw$results[,-5], GP_MM_results_mq_raw$results[,-5])#, #GP_MM_results_mq_preds$results$)
 
 
-
 unique(GP_MM_master$Trait)
 
 GP_MM_master <- GP_MM_master%>% filter(!Trait == "BarleyColor.Agtron.")
@@ -278,9 +277,15 @@ GP_MM_master$type<- NA
 
 **Merge MT GP**
 ```{r}
+summary(MT_ag_res_raw_sp$results$Cor)
+
+MT_ag_res_raw_sp$results$BLUE = "One"
+MT_mq_res_raw_sp$results$BLUE = "One"
+
 MT_res_raw<- rbind(MT_ag_res_raw_sp$results, MT_mq_res_raw_sp$results)
+colnames(MT_res_raw)
 MT_res_raw<- MT_res_raw[-4:-5]
-MT_res_raw$BLUE<- "One"
+#MT_res_raw$BLUE<- "One"
 MT_res_raw$type<- NA
 MT_res_raw$met<- "MT"
 ```
@@ -354,8 +359,8 @@ cv_summary
 
 # **3. Plot LM, RF, GLM and MM results **
 ```{r}
-PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>% filter(BLUE == "One")
-
+PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy  %>% filter(BLUE == "One") %>% filter(Predictor_Set %in% c("NA", "NDVI", "PSRI")) %>% filter(sel == "comb")
+table(PP_LM_MM_accuracy1$Predictor_Set, PP_LM_MM_accuracy1$sel)
 ##############Trait##########################################################################
 library(RColorBrewer)
 base_pal <- brewer.pal(12, "Set3")
@@ -377,7 +382,7 @@ p<- ggplot(PP_LM_MM_accuracy1, aes(x = Trait, y = Accuracy, fill = Trait)) +
     strip.text = element_text(size = 14, face = "bold"),
     axis.title = element_text(size = 14),
     axis.text  = element_text(size = 14, angle = 90),
-    legend.position = "bottom"
+    legend.position = "none"
   )
 print(p)
 
@@ -387,7 +392,7 @@ p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Environ
    facet_grid(~Trait, scales = "free") +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Environment"
   ) +
  scale_fill_manual(values = pal_combined) +
@@ -396,7 +401,7 @@ p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Environ
     strip.text = element_text(size = 12, face = "bold"),
     axis.title = element_text(size = 12),
     axis.text  = element_text(size = 12, angle = 90),
-    legend.position = "bottom", 
+    legend.position = "none", 
     legend.text = element_text(size = 12)
   )
 print(p)
@@ -410,9 +415,10 @@ PP_LM_MM_accuracy1 <- PP_LM_MM_accuracy %>%
 p<- ggplot(PP_LM_MM_accuracy1, aes(x = Model, y = Accuracy, fill = Model)) +
   geom_boxplot() +
   facet_grid(~Trait, scales = "free") +
+  scale_fill_manual(values = pal_combined) +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model"
   ) +
   theme(
@@ -424,7 +430,7 @@ p<- ggplot(PP_LM_MM_accuracy1, aes(x = Model, y = Accuracy, fill = Model)) +
 
 print(p)
 
-res <- PP_LM_MM_accuracy %>%
+res <- PP_LM_MM_accuracy1 %>%
   filter(BLUE == "One") %>%  filter(Predictor_Set %in% c("NDVI", "PSRI", "NA")) %>% filter(!met %in% c("MM_ag_raw_comb", "MM_mq_raw_comb"))
 
 ##############trait env##########################################################################
@@ -467,11 +473,11 @@ cv_summary <- res %>%
 
 cv_summary
 
-mean(cv_summary$cv_accuracy, na.rm=TRUE )
+mean(cv_summary$cv_accuracy, na.rm=TRUE)
 ##############model##########################################################################
 
 cv_summary<- res %>%
-  group_by(Model) %>%
+  group_by(Predictor_Set) %>%
   summarise(
     mean_accuracy = mean(Accuracy, na.rm = TRUE),
     min = min(Accuracy, na.rm= TRUE), 
@@ -488,7 +494,44 @@ cv_summary<- res %>%
   ) %>%
   arrange(cv_accuracy)
 
+
+cv_summary <- res %>%
+  group_by(Environment) %>%
+  summarise(
+    mean_accuracy = mean(Accuracy, na.rm = TRUE),
+    min = min(Accuracy, na.rm= TRUE), 
+    max = max(Accuracy, na.rm = TRUE),
+    sd_accuracy   = sd(Accuracy, na.rm = TRUE),
+    n             = sum(!is.na(Accuracy)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      (mean_accuracy) > 1e-1,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>% arrange(mean_accuracy)
+
+cv_summary
+
 mean(cv_summary$cv_accuracy)
+cv_summary<- res %>%
+  group_by(Predictor_Set) %>%
+  summarise(
+    mean_accuracy = mean(Accuracy, na.rm = TRUE),
+    min = min(Accuracy, na.rm= TRUE), 
+    max = max(Accuracy, na.rm = TRUE),
+    sd_accuracy   = sd(Accuracy, na.rm = TRUE),
+    n             = sum(!is.na(Accuracy)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      abs(mean_accuracy) > 1e-6,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(cv_accuracy)
 
 
 PP_LM_MM_accuracy12<- PP_LM_MM_accuracy1 %>% filter(Trait %in% c("GY", "HD"))
@@ -529,6 +572,38 @@ anova_df <- anova_df %>%
     perc_var = 100 * `Sum Sq` / ss_total
   )
 
+
+#############ws vs no ws year PP""""""""""""""""2
+
+
+PP_LM_MM_accuracy12<- PP_LM_MM_accuracy1 #%>% filter(!Trait %in% c("GY", "HD"))
+PP_LM_MM_accuracy12 %>%
+  group_by(Environment) %>%
+  summarise(
+    mean_accuracy = mean(Accuracy, na.rm = TRUE),
+    min = min(Accuracy, na.rm= TRUE), 
+    max = max(Accuracy, na.rm = TRUE),
+    sd_accuracy   = sd(Accuracy, na.rm = TRUE),
+    n             = sum(!is.na(Accuracy)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      abs(mean_accuracy) > 1e-6,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(Environment)
+
+
+data_ag%>%
+  group_by(Env) %>%
+  summarise(
+    mean_WS = mean(winter_survival, na.rm = TRUE),
+    min = min(winter_survival, na.rm= TRUE), 
+    max = max(winter_survival, na.rm = TRUE))
+    .groups = "drop"
+  )
 ```
 
 
@@ -545,7 +620,7 @@ p<- ggplot(PP_LM_MM_accuracy1, aes(x = Environment, y = Accuracy, fill = Environ
    facet_grid(~Trait, scales = "free") +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) +
   theme(
@@ -573,7 +648,7 @@ table(GP_MM_master1$Trait)
 ggplot(GP_MM_master1, aes(x =Trait, y = Cor, fill = Trait)) +
   geom_boxplot() +
   labs(title = " ",
-       y = "Prediction Accuracy", x = "Model Method") +
+       y = "CV Predictive Ability", x = "Model Method") +
   coord_cartesian(ylim = c(-0.2, 1)) +
   scale_fill_manual(values = pal_combined) +
   theme(
@@ -591,7 +666,7 @@ ggplot(GP_MM_master1, aes(x = Trait, y = Cor, fill = Trait)) +
   geom_boxplot() +
    facet_wrap(~  Env, scales = "free_x", ncol = 5) +
   labs(title = " ",
-       y = "Prediction Accuracy", x = "") +
+       y = "CV Predictive Ability", x = "") +
   scale_fill_manual(values = pal_combined) +
   theme(
     strip.text = element_text(size = 12, face = "bold"),
@@ -645,7 +720,8 @@ cv_summary1 <- GP_MM_master1 %>%
 
 cv_summary1
 dim(cv_summary1)
-mean(cv_summary1$cv_accuracy[6:14,])
+mean(cv_summary1$cv_accuracy[6:14])
+
 
 ##############trait v env#########################################################################
 cv_summary11 <- GP_MM_master1 %>%
@@ -676,20 +752,20 @@ cv_summary11
 ```{r}
 #Accuracy by environment
 MT_res_raw <- GP_res %>% filter(met =="MT") #>% filter(Cor_Trait =="FPC1")
-
+# no BP. 
 table(MT_res_raw$Cor_Trait)
-
-MT_res_raw <- MT_res_raw %>% filter(!Cor_Trait %in% c("FPC2", "FPC3"))
+#MT_res_raw <- MT_res_raw %>% filter(!Cor_Trait %in% c("FPC2", "FPC3"))
 
 ##############trait v env##########################################################################
 ggplot(MT_res_raw, aes(x =Environment, y = Cor, fill = Environment)) +
   geom_boxplot() +
-  facet_wrap(~  Trait, scales = "free_x", nrow= 2, ncol= 7) +
+  scale_fill_manual(values = pal_combined) +
+  facet_grid(~  Trait, scales = "free_x") +
   labs(title = " ",
-       y = "Prediction Accuracy", x = "Model Method") +
+       y = "CV Predictive Ability", x = "Model Method") +
   theme(
-    strip.text = element_text(size = 12, face = "bold"),
-    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
     axis.text  = element_text(size = 12, angle = 90),  legend.position = "bottom")
 
 
@@ -698,7 +774,23 @@ ggplot(MT_res_raw, aes(x =Trait, y = Cor, fill = Trait)) +
   geom_boxplot() +
   #facet_wrap(~  Trait, scales = "free_x") +
   labs(title = " ",
-       y = "Prediction Accuracy", x = "Model Method") +
+       y = "CV Predictive Ability", x = "Model Method") +
+  scale_fill_manual(values = pal_combined) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom", 
+    legend.text = element_text(size = 12)
+  )
+
+############## cor trait##########################################################################
+table(MT_res_raw$Trait)
+ggplot(MT_res_raw, aes(x =Trait, y = Cor, fill = Cor_Trait)) +
+  geom_boxplot() +
+  facet_grid(~Trait, scales = "free_x") +
+  labs(title = " ",
+       y = "CV Predictive Ability", x = "Model Method") +
   scale_fill_manual(values = pal_combined) +
   theme(
     strip.text = element_text(size = 12, face = "bold"),
@@ -777,6 +869,35 @@ cv_summary <- MT_res_raw %>%
     ) %>% arrange(mean_accuracy)
 cv_summary
 
+
+##############trait v env#########################################################################
+cv_summary22 <- MT_res_raw %>%
+  group_by( Cor_Trait) %>%
+  summarise(
+    mean_accuracy = mean(Cor, na.rm = TRUE),
+    min = min(Cor, na.rm= TRUE), 
+    max = max(Cor, na.rm = TRUE),
+    sd_accuracy   = sd(Cor, na.rm = TRUE),
+    n             = sum(!is.na(Cor)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      abs(mean_accuracy) > 1e-6,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  )  %>% arrange(mean_accuracy)
+cv_summary22
+
+cv_summary <- MT_res_raw %>%
+  summarise(
+       mean_accuracy = mean(Cor, na.rm = TRUE),
+    sd_accuracy   = sd(Cor, na.rm = TRUE),
+    se_accuracy   = sd_accuracy / sqrt(n()),
+    cv_accuracy   = sd_accuracy / mean_accuracy,
+    n = n()
+    ) %>% arrange(mean_accuracy)
+cv_summary
 ```
 
 
@@ -792,7 +913,7 @@ ggplot(GP_DK_res, aes(x =Environment, y = Cor, fill = Environment)) +
   geom_boxplot() +
  facet_wrap(~Trait, scales = "free_x", nrow = 2, ncol = 7)+
   labs(title = " ",
-       y = " CV Prediction Accuracy", x = "") +
+       y = "CV Predictive Ability", x = "") +
   theme(
     strip.text = element_text(size = 12, face = "bold"),
     axis.title = element_text(size = 12),
@@ -809,8 +930,6 @@ ggplot(GP_DK_res, aes(x =Trait, y = Cor, fill = Trait)) +
     legend.position = "bottom", 
     legend.text = element_text(size = 12))+
    coord_cartesian(ylim = c(-0.2, 1))
-
-
 
 ##############Env##########################################################################
 cv_summary <- GP_DK_res%>%
@@ -888,8 +1007,6 @@ cv_summary
 #Comparing MT_GP, DK. 
 
 ```{r}
-
-
 cv_summary <- GP_res %>%
   group_by(Env, met, Trait) %>%
   summarise(
@@ -1082,6 +1199,44 @@ cv_sum<-  res %>%
     .groups = "drop"
   )  
 
+
+cv_sum<-  res %>%
+  group_by(Trait) %>%
+    summarise(
+    mean_accuracy = mean(Cor, na.rm = TRUE),
+    min = min(Cor, na.rm= TRUE), 
+    max = max(Cor, na.rm = TRUE),
+    sd_accuracy   = sd(Cor, na.rm = TRUE),
+    n             = sum(!is.na(Cor)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      (mean_accuracy) > 1e-1,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  )  %>% arrange(cv_accuracy)
+
+
+
+cv_sum <-  res %>%
+  group_by(Trait, met, Env) %>%
+    summarise(
+    mean_accuracy = mean(Cor, na.rm = TRUE),
+    min = min(Cor, na.rm= TRUE), 
+    max = max(Cor, na.rm = TRUE),
+    sd_accuracy   = sd(Cor, na.rm = TRUE),
+    n             = sum(!is.na(Cor)),
+    se_accuracy   = sd_accuracy / sqrt(n),
+    cv_accuracy   = ifelse(
+      (mean_accuracy) > 1e-1,
+      sd_accuracy / mean_accuracy*100,
+      NA_real_
+    ),
+    .groups = "drop"
+  )  %>% arrange(Env)
+
+cv_sum[,1:3]
 #####################################################################
 cv_wide <- cv_sum %>%
   select(Trait, met, mean_accuracy, Env) %>%
@@ -1103,7 +1258,7 @@ cv_diff <- cv_diff %>%
   )
 
 cv_summary <- cv_diff %>%
-  group_by(Trait) %>%
+  group_by(Env) %>%
   summarise(
     mean_MT_vs_GP = mean(MT_vs_GP, na.rm = TRUE),
     mean_DK_vs_GP = mean(DK_vs_GP, na.rm = TRUE),
@@ -1144,7 +1299,7 @@ ggplot(GP_res1, aes(x = Environment, y = Cor, fill = met)) +
    facet_grid(met~Trait, scales = "free") +
   labs(
     title = " ",
-    y = "Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) +
   scale_fill_manual(values = c("cornsilk3", "palegreen2" ,  "wheat2")) +
@@ -1165,7 +1320,7 @@ ggplot(GP_res1, aes(x = met, y = Cor, fill = met)) +
   facet_grid(~Trait, scales = "free") +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) + 
   coord_cartesian(ylim = c(-0.2, 1)) +
@@ -1218,7 +1373,7 @@ ggplot(PP_LM_MM1, aes(x = Trait, y = Cor, fill = Trait)) +
    facet_grid(~Environment, scales = "free") +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) +
   theme(
@@ -1234,7 +1389,7 @@ ggplot(PP_LM_MM1, aes(x = met, y = Cor, fill = met)) +
    facet_grid(~Trait, scales = "free") +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) +
   theme(
@@ -1251,7 +1406,7 @@ ggplot(PP_LM_MM1, aes(x = Trait, y = Cor, fill = Trait)) +
   geom_boxplot() +
   labs(
     title = " ",
-    y = "CV Prediction Accuracy",
+    y = "CV Predictive Ability",
     x = "Model Method"
   ) +
   theme(
@@ -1260,9 +1415,6 @@ ggplot(PP_LM_MM1, aes(x = Trait, y = Cor, fill = Trait)) +
     axis.text  = element_text(size = 10, angle = 90),
     legend.position = "bottom"
   )
-
-
-
 
 ```
 

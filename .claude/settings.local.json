@@ -2,7 +2,19 @@
   "permissions": {
     "allow": [
       "Bash(Rscript -e ':*)",
-      "Bash('C:/Program Files/R/R-4.4.2/bin/Rscript.exe' -e ':*)"
+      "Bash('C:/Program Files/R/R-4.4.2/bin/Rscript.exe' -e ':*)",
+      "Bash(Rscript -e \"load\\('gwas_hits_master.Rdata'\\); cat\\('Objects:', ls\\(\\), '\\\\n'\\); cat\\('ipc head:\\\\n'\\); print\\(head\\(ipc, 3\\)\\); cat\\('ipc str:\\\\n'\\); str\\(ipc\\)\"2)",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e \"load\\('gwas_hits_master.Rdata'\\); cat\\('Objects:', ls\\(\\), '\\\\n'\\); print\\(head\\(ipc, 3\\)\\); str\\(ipc\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" test_ensembl_url.R2)",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" test_ensembl_url.R)",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" test_json_fields.R)",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" test_run.R)",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e \"df <- read.csv\\('candidates_6H_enriched.csv'\\); cat\\('Columns:\\\\n'\\); print\\(colnames\\(df\\)\\); cat\\('\\\\nFirst row:\\\\n'\\); print\\(t\\(df[1,]\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e \"load\\('focal_snps.Rdata'\\); cat\\('Object name\\(s\\):', ls\\(\\), '\\\\n'\\); cat\\('Class:', class\\(focal_snps\\), '\\\\n'\\); print\\(focal_snps\\)\")",
+      "Bash(where Rscript)",
+      "Read(//c/Program Files/R/**)",
+      "Bash(/c/Program Files/R/R-4.4.2/bin/Rscript.exe:*)",
+      "Bash(powershell.exe:*)"
     ]
   }
 }

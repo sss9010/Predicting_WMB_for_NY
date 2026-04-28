@@ -1,0 +1,802 @@
+---
+title: "GWAS_WH_plots"
+author: "sss322"
+date: "2026-03-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## **Load dependencies**
+
+```{r}
+library(dplyr)
+library(tidyr)
+#library(GAPIT3)
+#library(SNPRelate)
+#library(ASRgenomics)
+#library(ASRgwas)
+library(asreml)
+library(readxl)
+```
+
+
+```{r}
+#source("http://zzlab.net/GAPIT/GAPIT.library.R") 
+#source("http://zzlab.net/GAPIT/gapit_functions.txt")
+```
+
+```{r}
+load("data/LTT_geno.Rdata")
+```
+
+
+
+## **1. GWAS for WH**
+
+```{r}
+#LTT_pheno <- read_excel("data/LTT_pheno.xlsx")
+load("data/wsBLUP.Rdata")
+
+```
+
+```{r}
+F_PCA1<- ws_blup %>% filter(Env == "MTPLS")
+F_PCA1<- ws_blup[,c(1,2,5)] %>% pivot_wider(names_from = Env, values_from = predicted.value)
+
+colnames(F_PCA1)[1]<- "Taxa"
+#colnames(F_PCA1)[2]<- "WS"
+
+myY<- F_PCA1 %>% na.omit()
+```
+
+
+```{r}
+## 0. Load + format GD & GM ------------------------------------------------
+load("C:/Users/Siim Sepp/MN_LTT/data/LTT_g__nonimp.Rdata")
+geno <- LTT_geno_t[1:662, , drop = FALSE]
+myGD <- data.frame(
+  taxa = rownames(geno),
+  geno,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+) |> 
+  tibble::as_tibble()
+rownames(myGD) <- NULL
+
+myGM<- read_xlsx("data/SNP_information.xlsx")
+myY$Taxa <- gsub("-", ".", myY$Taxa)
+
+## 1. Harmonize taxa & SNP sets --------------------------------------------
+keep_taxa <- intersect(myY$Taxa, myGD$taxa)
+
+myY  <- myY  |> dplyr::filter(Taxa %in% keep_taxa)
+myGD <- myGD |> dplyr::filter(taxa %in% keep_taxa)
+
+# keep SNPs that are in both GD and GM, and on positive chromosomes
+myGM <- myGM |> dplyr::filter(Chromosome > 0)
+
+keep_snp <- intersect(myGM$Name, colnames(myGD)[-1])
+
+myGM <- myGM |> dplyr::filter(Name %in% keep_snp)
+myGD <- myGD[, c("taxa", keep_snp), drop = FALSE]
+
+##########################################################################################
+## 2. Filter SNPs by missingness & impute mode ------------------------------
+missing_prop <- colMeans(is.na(myGD[,-1]))
+keep_snps    <- missing_prop <= 0.10
+
+# keep taxa + SNPs with ≤10% missing
+myGD <- myGD[, c(TRUE, keep_snps), drop = FALSE]
+
+# mode imputation helper
+stat_mode <- function(x) {
+  ux <- unique(stats::na.omit(x))
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+myGD[,-1] <- apply(myGD[,-1], 2, function(x) {
+  ifelse(is.na(x), stat_mode(x), x)
+})
+
+## 3. Clean & align GM to GD -----------------------------------------------
+myGM <- myGM |>
+  dplyr::mutate(
+    Chromosome = as.integer(Chromosome),
+    Position   = suppressWarnings(as.numeric(Position))
+  ) |>
+  dplyr::filter(
+    is.finite(Chromosome),
+    is.finite(Position),
+    Position > 0
+  ) |>
+  dplyr::distinct(Name, .keep_all = TRUE) |>
+  dplyr::arrange(Chromosome, Position)
+##########################################################################################
+# rename to GAPIT / rrBLUP style
+names(myGM)[1:3] <- c("SNP", "Chromosome", "Position")
+myGM$SNP <- as.character(myGM$SNP)
+
+# final realignment to ensure identical SNP set + order
+common <- intersect(colnames(myGD)[-1], myGM$SNP)
+myGM <- myGM[match(common, myGM$SNP), , drop = FALSE]
+myGD <- myGD[, c("taxa", common), drop = FALSE]
+
+myGD$taxa
+myY$Taxa
+table(myGD$taxa %in% myY$Taxa)
+```
+
+#GDD
+#```{r}
+traits <- colnames(myY)[-1]   # all traits except the Taxa column
+WHgwas_list <- list()
+
+for (tr in traits) {
+  message("Running GWAS for trait: ", tr)
+
+  # GAPIT requires Y to have only Taxa + 1 phenotype
+  Y_single <- as.data.frame(myY[, c("Taxa", tr)])
+
+  res_tr <- GAPIT(
+    Y            = Y_single,
+    GD           = myGD,
+    GM           = myGM,
+    PCA.total    = 2,
+    model        = "FarmCPU",
+    Multiple_analysis = FALSE,
+    SNP.MAF      = 0.01,
+    file.output  = FALSE
+  )
+
+  WHgwas_list[tr] <- res_tr
+}
+#```
+
+
+
+#```{r}
+################################### within env
+load("GWAS_res_GDD_w_env_PSRI_raw.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "RAW"
+GWAS_GD_w_env$met<- "w_env"
+G_master<- GWAS_GD_w_env
+
+load("GWAS_res_GDD_w_env_NDVI_raw.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "RAW"
+GWAS_GD_w_env$met<- "w_env"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_GDD_w_env_PSRI_BLUE.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "w_env"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_GDD_w_env_NDVI_BLUE.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "w_env"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+G_master$JG<- "GDD"
+
+load("GWAS_res_JDD_w_env_PSRI_raw.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "RAW"
+GWAS_GD_w_env$met<- "w_env"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_JDD_w_env_NDVI_raw.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "RAW"
+GWAS_GD_w_env$met<- "w_env"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_JDD_w_env_PSRI_BLUE.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "w_env"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_JDD_w_env_NDVI_BLUE.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "w_env"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+
+
+################################### multi
+load("GWAS_res_JDD_PSRI_multi.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "multi"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_GDD_PSRI_multi.Rdata")
+GWAS_GD_w_env$VI <- "PSRI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "multi"
+GWAS_GD_w_env$JG<- "GDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_JDD_NDVI_multi.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "multi"
+GWAS_GD_w_env$JG<- "JDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+load("GWAS_res_GDD_NDVI_multi.Rdata")
+GWAS_GD_w_env$VI <- "NDVI"
+GWAS_GD_w_env$BLUE<- "BLUE"
+GWAS_GD_w_env$met<- "multi"
+GWAS_GD_w_env$JG<- "GDD"
+G_master<- rbind(GWAS_GD_w_env, G_master)
+
+################################### WS
+load("GWAS_res_WH.Rdata")
+WHcld <- WHgwas_list$CLD %>%
+  mutate(
+    Trait = "WH",
+    Env   = "CLD",
+    VI    = "CLD",
+    BLUE  = "BLUE",
+    met   = "WH",
+    JG    = "WH"
+  )
+
+WHsny <- WHgwas_list$SNY %>%
+  mutate(
+    Trait = "WH",
+    Env   = "SNY",
+    VI    = "SNY",
+    BLUE  = "BLUE",
+    met   = "WH",
+    JG    = "WH"
+  )
+WHmtpls <- WHgwas_list$MTPLS %>%
+  mutate(
+    Trait = "WH",
+    Env   = "MTPLS",
+    VI    = "MTPLS",
+    BLUE  = "BLUE",
+    met   = "WH",
+    JG    = "WH"
+  )
+
+GWAS_res<- rbind(WHmtpls, WHsny, WHcld, G_master)
+
+save(GWAS_res, file="G_res_master.Rdata")
+#```
+
+
+
+
+## **9. GWAS plots over Env, FPC and met. **
+
+**Manhattan plots**
+```{r, eval=FALSE}
+load("G_res_master.Rdata")
+table(GWAS_res$met)
+table(GWAS_res$Trait)
+table(GWAS_res$Env)
+table(GWAS_res$VI)
+table(GWAS_res$BLUE)
+table(GWAS_res$JG)
+
+colnames(GWAS_res)[2]<- "Chr"
+colnames(GWAS_res)[3]<- "Pos"
+
+
+
+GWAS_res$neglogP   = -log10(GWAS_res$P.value)
+GWAS_hits<- GWAS_res %>%   arrange(desc(neglogP))
+#writexl::write_xlsx(GWAS_hits[1:500,], path= "GWAS_hits.xlsx")
+
+head(GWAS_hits, n= 50)
+```
+
+
+#GWAS hits for FPC-s w env RAW FPC1
+```{r}
+library(ggplot2)
+colnames(GWAS_res)[2:3]<- c("Chr", "Pos")
+#################################################################################
+GWAS_D <- GWAS_res %>% filter(met == "w_env")  %>% filter(BLUE == "BLUE") %>%filter(JG == "GDD") %>% filter(Trait == "FPC1") #%>% filter(VI == "NDVI") #
+
+# prepare for Manhattan: cumulative position by chromosome
+manhattan_df <- GWAS_D %>%
+  filter(!is.na(P.value), P.value > 0) %>%
+  arrange(Chr, Pos) %>%
+  group_by(Chr) %>%
+  mutate(Pos_chr = Pos) %>%
+  ungroup() %>%
+  arrange(Chr, Pos) %>%
+  mutate(
+    chr_len   = tapply(Pos_chr, Chr, max, na.rm = TRUE)[as.character(Chr)],
+    chr_start = ave(chr_len, Chr, FUN = function(x) { c(0, cumsum(head(unique(x), -1))) })[as.character(Chr)],
+    Pos_cum   = Pos_chr + chr_start,
+    neglogP   = -log10(P.value)
+  ) %>%
+  ungroup()
+
+
+axis_df <- manhattan_df %>%
+  group_by(Chr) %>%
+  summarise(center = (min(Pos_cum) + max(Pos_cum)) / 2, .groups = "drop")
+
+
+manhattan_df1<- manhattan_df  %>% filter(neglogP >1) 
+
+bonf <- -log10(0.05 / nrow(manhattan_df))
+ggplot(manhattan_df1, aes(x = Pos_cum, y = neglogP, colour = VI)) +
+  geom_point(alpha = 0.6, size = 4) +
+  geom_hline(
+    yintercept = bonf,
+    linetype = "dashed",
+    color = "red",
+    linewidth = 0.8
+  ) +
+  facet_grid(Env ~ Chr, scales = "free") +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    strip.text  = element_text(size = 16, face = "bold"),
+    plot.title  = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+ihh<- manhattan_df %>% filter(neglogP>bonf) %>% arrange(neglogP, F)
+ipp<- manhattan_df %>% filter(neglogP>4) %>% arrange(neglogP, F)
+ipp <- ipp %>%
+  dplyr::select(SNP, Chr, Pos, neglogP,maf, effect, VI, Env, Trait) %>% arrange(Chr) # %>%   kable()
+#################################################################################
+#WH
+table(GWAS_res$met)
+GWAS_D <- GWAS_res %>% filter(met == "WH")  %>% filter(BLUE == "BLUE") #%>%filter(JG == "GDD") #%>% filter(Trait == "FPC1") #%>% filter(VI == "NDVI") #
+
+# prepare for Manhattan: cumulative position by chromosome
+manhattan_df <- GWAS_D %>%
+  filter(!is.na(P.value), P.value > 0) %>%
+  arrange(Chr, Pos) %>%
+  group_by(Chr) %>%
+  mutate(Pos_chr = Pos) %>%
+  ungroup() %>%
+  arrange(Chr, Pos) %>%
+  mutate(
+    chr_len   = tapply(Pos_chr, Chr, max, na.rm = TRUE)[as.character(Chr)],
+    chr_start = ave(chr_len, Chr, FUN = function(x) { c(0, cumsum(head(unique(x), -1))) })[as.character(Chr)],
+    Pos_cum   = Pos_chr + chr_start,
+    neglogP   = -log10(P.value)
+  ) %>%
+  ungroup()
+
+
+axis_df <- manhattan_df %>%
+  group_by(Chr) %>%
+  summarise(center = (min(Pos_cum) + max(Pos_cum)) / 2, .groups = "drop")
+
+
+manhattan_df1<- manhattan_df %>% filter(neglogP >1) 
+
+bonf <- -log10(0.05 / nrow(manhattan_df))
+ggplot(manhattan_df1, aes(x = Pos_cum, y = neglogP, colour = Env)) +
+  geom_point(alpha = 0.6, size = 4) +
+  geom_hline(
+    yintercept = bonf,
+    linetype = "dashed",
+    color = "red",
+    linewidth = 0.8
+  ) +
+  facet_grid(Env ~ Chr, scales = "free") +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    strip.text  = element_text(size = 16, face = "bold"),
+    plot.title  = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+ipc<- manhattan_df %>% filter(neglogP>4) %>% arrange(neglogP, F)
+
+library(knitr)
+ipc <- ipc %>%
+  dplyr::select(SNP, Chr, Pos, neglogP,maf, effect, VI, Trait, Env) %>% arrange(Chr)# %>% kable()
+
+
+ip<- rbind(ipp, ipc)
+
+#################################################################################
+#################################################################################
+GWAS_D <- GWAS_res %>% filter(met == "multi")  %>% filter(BLUE == "BLUE") %>% filter(JG == "GDD") #%>% filter(Trait == "FPC1") #%>% filter(VI == "NDVI") #
+
+# prepare for Manhattan: cumulative position by chromosome
+manhattan_df <- GWAS_D %>%
+  filter(!is.na(P.value), P.value > 0) %>%
+  arrange(Chr, Pos) %>%
+  group_by(Chr) %>%
+  mutate(Pos_chr = Pos) %>%
+  ungroup() %>%
+  arrange(Chr, Pos) %>%
+  mutate(
+    chr_len   = tapply(Pos_chr, Chr, max, na.rm = TRUE)[as.character(Chr)],
+    chr_start = ave(chr_len, Chr, FUN = function(x) { c(0, cumsum(head(unique(x), -1))) })[as.character(Chr)],
+    Pos_cum   = Pos_chr + chr_start,
+    neglogP   = -log10(P.value)
+  ) %>%
+  ungroup()
+
+
+axis_df <- manhattan_df %>%
+  group_by(Chr) %>%
+  summarise(center = (min(Pos_cum) + max(Pos_cum)) / 2, .groups = "drop")
+
+
+manhattan_df1<- manhattan_df  %>% filter(neglogP >1) 
+
+bonf <- -log10(0.05 / nrow(manhattan_df))
+ggplot(manhattan_df1, aes(x = Pos_cum, y = neglogP, group= VI, colour = VI)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_hline(
+    yintercept = bonf,
+    linetype = "dashed",
+    color = "red",
+    linewidth = 0.8
+  ) +
+  facet_grid(Env ~ Chr, scales = "free") +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](P))
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    strip.text  = element_text(size = 16, face = "bold"),
+    plot.title  = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 90, hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+ihh<- manhattan_df %>% filter(neglogP>bonf) %>% arrange(neglogP, F)
+ipp<- manhattan_df %>% filter(neglogP>3.5) %>% arrange(neglogP, F)
+
+ipp <- ipp %>%
+  dplyr::select(SNP, Chr, Pos, neglogP,maf, effect, VI, Trait, Env) %>% arrange(Chr)# %>% kable()
+
+ipc<- rbind(ip, ipp)
+ipc<- ipc %>% arrange(neglogP)
+save(ipc, file= "gwas_hits_master.Rdata")
+writexl::write_xlsx(ipc, path= "gwas_hits_master.xlsx")
+```
+
+
+```{r}
+qq_df <- manhattan_df %>%
+  filter(!is.na(P.value), P.value > 0) %>%
+  group_by(Env,VI, met ) %>%
+  arrange(P.value) %>%
+  mutate(
+    obs     = -log10(P.value),
+    exp     = -log10(ppoints(n())),
+    idx     = row_number()
+  ) %>%
+  ungroup()
+
+ggplot(qq_df, aes(x = exp, y = obs, colour = VI)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  geom_point(alpha = 0.6, size = 1,) +
+  facet_wrap(~ Env + met, scales= "free") +
+  labs(
+    x = "Expected -log10(P)",
+    y = "Observed -log10(P)",
+    title = "QQ plots by environment"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+
+
+
+
+
+
+
+## **Looking into the GWAS hits — LD around focal SNPs**
+
+```{r focal-setup}
+ipc <- ipc %>% arrange(desc(neglogP))
+
+# ════════════════════════════════════════════════════════
+# USER PARAMETERS
+window_mb    <- 10      # ± window in Mb around each focal SNP
+r2_threshold <- 0.2     # r² highlight threshold (dashed line)
+
+# Focal SNPs to analyse — one row per locus.
+# Default: top hit per chromosome from ipc.
+# To override, replace with a named vector, e.g.:
+#   focal_snps <- c("6H" = "JHI-Hv50k-2016-426461",
+#                   "2H" = "BOPA2_12_31205")
+focal_snps <- ipc %>%
+  group_by(Chr) %>%
+  slice_max(neglogP, n = 1, with_ties = FALSE) %>%
+  arrange(Chr) %>%
+  { setNames(.$SNP, paste0(.$Chr, "H")) }
+
+
+#1
+snp1 <- ipc %>% filter(Chr == "1") 
+snp1<- snp1$SNP[10]
+
+#2
+#3
+snp3 <- ipc %>% filter(Chr == "3") 
+snp3<- snp3$SNP[6]
+
+#5
+snp5 <- ipc %>% filter(Chr == "5") 
+snp5<- snp5$SNP[3]
+
+
+#6
+#7
+snp7 <- ipc %>% filter(Chr == "7") 
+snp7<- snp7$SNP[5]
+
+
+focal_snps[1] <- snp1
+focal_snps[3] <- snp3
+focal_snps[5] <- snp5
+focal_snps[7] <- snp7
+focal_snps<- focal_snps[-4]
+
+cat("Focal SNPs selected:\n")
+print(focal_snps)
+# ════════════════════════════════════════════════════════
+```
+
+
+```{r load-map}
+
+proj_roots <- c(
+  "C:/Users/Siim Sepp/MN_LTT",
+  "C:/Users/Siim Sepp/MN_LTT",
+  "~/Documents/GitHub/MN_LTT"
+)
+proj_root <- proj_roots[dir.exists(proj_roots)][1]
+message("Project root: ", proj_root)
+# ── SNP chromosome / position map ─────────────────────────────────────────
+map_paths <- c(
+  file.path(proj_root, "data/geno/SNPPositions_50k_on_MorexV3.xlsx"),
+  file.path(proj_root, "data/SNPPositions_50k_on_MorexV3.xlsx")
+)
+map_file <- map_paths[file.exists(map_paths)][1]
+
+if (!is.na(map_file)) {
+  snp_map <- read_xlsx(map_file)
+  # Standardise column names regardless of exact header text
+  names(snp_map) <- tolower(names(snp_map))
+  snp_map$chr <- gsub("H", "", snp_map$`refseq name`)
+  snp_map$chr <- gsub("chr", "", snp_map$chr)
+  # Detect rs/marker, chrom, pos columns
+  marker_col <- colnames(snp_map)[1]
+  chr_col    <- grep("chr|chrom",          names(snp_map), value = TRUE)[1]
+  pos_col    <- colnames(snp_map)[3]
+  snp_map <- snp_map %>%
+    rename(Marker = all_of(marker_col),
+           Chr    = all_of(chr_col),
+           Pos    = all_of(pos_col)) %>%
+    mutate(Chr = as.character(Chr),
+           Pos = as.numeric(Pos)) %>%
+    filter(Marker %in% colnames(myGD),
+           !Chr %in% c("0","Un","NA",NA))   # drop unplaced markers
+  cat("Markers with map position:", nrow(snp_map),
+      "on", n_distinct(snp_map$Chr), "chromosomes\n")
+} else {
+  warning("SNP position file not found — LD decay will use marker index order only.")
+  snp_map <- tibble(
+    Marker = colnames(geno_a),
+    Chr    = "unknown",
+    Pos    = seq_len(ncol(geno_a))
+  )
+}
+```
+
+
+
+
+
+
+
+```{r focal-analysis-fn}
+# ── r² helper ──────────────────────────────────────────────────────────────
+r2_pair <- function(x, y) {
+  ok <- complete.cases(x, y)
+  if (sum(ok) < 10) return(NA_real_)
+  cor(x[ok], y[ok])^2
+}
+
+# ── Main per-SNP analysis function ─────────────────────────────────────────
+run_focal_ld <- function(focal_snp,
+                         window_mb    = get("window_mb",    envir = parent.frame()),
+                         r2_threshold = get("r2_threshold", envir = parent.frame())) {
+  window_bp <- window_mb * 1e6
+
+  if (!focal_snp %in% snp_map$Marker) {
+    message("  focal_snp '", focal_snp, "' not in SNP map — skipping.")
+    return(invisible(NULL))
+  }
+
+  focal_row <- snp_map %>% filter(Marker == focal_snp)
+  focal_chr <- focal_row$Chr
+  focal_pos <- focal_row$Pos
+
+  cat(sprintf("Focal SNP: %s | Chr %s | %.3f Mb | window ± %.1f Mb\n",
+              focal_snp, focal_chr, focal_pos / 1e6, window_mb))
+
+  # ── Window markers ────────────────────────────────────────────────────────
+  win_map <- snp_map %>%
+    filter(Chr    == focal_chr,
+           Pos    >= focal_pos - window_bp,
+           Pos    <= focal_pos + window_bp,
+           Marker %in% myGM$SNP) %>%
+    arrange(Pos)
+
+  cat(sprintf("  Markers in window: %d\n", nrow(win_map)))
+  if (nrow(win_map) < 2) {
+    message("  Fewer than 2 markers in window — skipping.")
+    return(invisible(NULL))
+  }
+
+  # ── r² to focal SNP ───────────────────────────────────────────────────────
+  focal_geno <- myGD[[focal_snp]]
+  ld_focal <- win_map %>%
+    mutate(
+      r2       = vapply(Marker, function(m) r2_pair(focal_geno, myGD[[m]]), numeric(1)),
+      dist_mb  = (Pos - focal_pos) / 1e6,
+      Pos_Mb   = Pos / 1e6,
+      is_focal = Marker == focal_snp
+    )
+
+  # ── LD scatter plot ───────────────────────────────────────────────────────
+  p_ld <- ggplot(ld_focal, aes(x = Pos_Mb, y = r2, colour = r2)) +
+    geom_vline(xintercept = c((focal_pos - window_bp) / 1e6,
+                               (focal_pos + window_bp) / 1e6),
+               linetype = "dotted", colour = "grey70") +
+    geom_hline(yintercept = r2_threshold, linetype = "dashed",
+               colour = "grey40", linewidth = 0.6) +
+    annotate("text", x = min(ld_focal$Pos_Mb), y = r2_threshold + 0.02,
+             hjust = 0, size = 3, colour = "grey40",
+             label = paste0("r\u00b2 = ", r2_threshold)) +
+    geom_point(size = 2.5, alpha = 0.85) +
+    geom_point(data = filter(ld_focal, is_focal),
+               size = 4, shape = 23, fill = "black", colour = "white") +
+    geom_text(data = filter(ld_focal, is_focal),
+              aes(label = Marker), vjust = -1, size = 3, colour = "black") +
+    scale_colour_gradientn(colours = c("steelblue","#fdae61","#d73027"),
+                           limits = c(0, 1), name = expression(r^2)) +
+    scale_y_continuous(limits = c(0, 1.02), breaks = seq(0, 1, 0.2)) +
+    labs(x     = sprintf("Position on Chr %s (Mb)", focal_chr),
+         y     = expression(r^2),
+         title = sprintf("LD around %s (Chr %s : %.3f Mb) | window \u00b1 %.1f Mb",
+                         focal_snp, focal_chr, focal_pos / 1e6, window_mb)) +
+    theme_bw(base_size = 13) + theme(legend.position = "right")
+  print(p_ld)
+
+  # ── LD decay (r² vs signed distance) ─────────────────────────────────────
+  p_decay <- ggplot(ld_focal, aes(x = dist_mb, y = r2, colour = r2)) +
+    geom_vline(xintercept = 0, linetype = "solid", colour = "grey30", linewidth = 0.4) +
+    geom_hline(yintercept = r2_threshold, linetype = "dashed",
+               colour = "grey40", linewidth = 0.6) +
+    geom_point(size = 2.5, alpha = 0.85) +
+    geom_point(data = filter(ld_focal, is_focal),
+               size = 4, shape = 23, fill = "black", colour = "white") +
+    geom_smooth(method = "loess", span = 0.3, se = FALSE,
+                colour = "black", linewidth = 0.7, linetype = "dashed") +
+    scale_colour_gradientn(colours = c("steelblue","#fdae61","#d73027"),
+                           limits = c(0, 1), name = expression(r^2)) +
+    scale_y_continuous(limits = c(0, 1.02), breaks = seq(0, 1, 0.2)) +
+    labs(x = "Distance from focal SNP (Mb)", y = expression(r^2),
+         title = "r\u00b2 vs signed distance from focal SNP") +
+    theme_bw(base_size = 13)
+  print(p_decay)
+
+  # ── Top markers in high LD (table) ────────────────────────────────────────
+  sp <- ld_focal %>%
+    filter(!is_focal, !is.na(r2)) %>%
+    arrange(desc(r2)) %>%
+    head(20) %>%
+    mutate(Pos_Mb  = round(Pos_Mb,  4),
+           dist_mb = round(dist_mb, 3),
+           r2      = round(r2,      3))
+  print(sp)
+
+  # ── Pairwise r² heatmap ───────────────────────────────────────────────────
+  hm_markers <- win_map$Marker
+  geno_mat   <- as.matrix(myGD[, hm_markers, drop = FALSE])
+  storage.mode(geno_mat) <- "numeric"
+  r2_mat  <- cor(geno_mat, use = "pairwise.complete.obs")^2
+  r2_long <- as.data.frame(r2_mat) |>
+    tibble::rownames_to_column("SNP1") |>
+    tidyr::pivot_longer(-SNP1, names_to = "SNP2", values_to = "r2") |>
+    dplyr::mutate(SNP1 = factor(SNP1, levels = hm_markers),
+                  SNP2 = factor(SNP2, levels = hm_markers))
+
+  show_labels <- length(hm_markers) <= 60
+  axis_theme  <- if (show_labels) {
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6),
+          axis.text.y = element_text(size = 6))
+  } else {
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+          axis.text.y = element_blank(), axis.ticks.y = element_blank())
+  }
+
+  p_heatmap <- ggplot(r2_long %>% filter(!is.na(r2)),
+                      aes(x = SNP1, y = SNP2, fill = r2)) +
+    geom_raster(interpolate = FALSE) +
+    scale_fill_gradientn(
+      colours = c("white", "#fdae61", "#d73027"), limits = c(0, 1),
+      breaks = c(0, 0.25, 0.5, 0.75, 1), labels = c("0","0.25","0.5","0.75","1"),
+      name = expression(r^2),
+      guide = guide_colourbar(barheight = unit(8,"cm"), barwidth = unit(0.4,"cm"),
+                              frame.colour = "grey40", ticks.colour = "grey40")) +
+    labs(title = sprintf("LD heatmap around %s  (Chr %s : %.3f Mb)  | window \u00b1 %.1f Mb",
+                         focal_snp, focal_chr, focal_pos / 1e6, window_mb),
+         x = NULL, y = NULL) +
+    coord_fixed() +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "right", plot.title = element_text(hjust = 0.5, size = 11),
+          axis.text = element_blank(), axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          panel.border = element_rect(colour = "grey40", linewidth = 0.5)) +
+    axis_theme
+  print(p_heatmap)
+
+  invisible(ld_focal)
+}
+```
+
+
+```{r focal-snp-loop, results='asis', message=FALSE, warning=FALSE}
+for (locus in names(focal_snps)) {
+  snp <- focal_snps[[locus]]
+  cat("\n\n### Locus", locus, "—", snp, "\n\n")
+  run_focal_ld(snp)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

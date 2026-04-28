@@ -443,6 +443,9 @@ MT_mq_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
 )
 
 save(MT_mq_res_raw_sp, file = file.path(base_path, "output/MT_mq_res_raw_sp.Rdata"))
+
+table(MT_mq_res_raw_sp$results$Cor_Trait)
+boxplot(MT_mq_res_raw_sp$results$Cor~MT_mq_res_raw_sp$results$Trait)
 ```
 
 

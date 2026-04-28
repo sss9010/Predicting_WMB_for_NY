@@ -1,0 +1,3 @@
+neighboring_snp,gene_id,gene_start,gene_end,strand,biotype,canonical_transcript
+573027766,HORVU.MOREX.r3.2HG0185100,573031375,573032661,1,protein_coding,HORVU.MOREX.r3.2HG0185100.1.
+573027766,HORVU.MOREX.r3.2HG0185090,573021607,573027852,1,protein_coding,HORVU.MOREX.r3.2HG0185090.1.
