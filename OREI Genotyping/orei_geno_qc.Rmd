@@ -1,0 +1,439 @@
+---
+title: "OREI 2024 B3K – Genotype QC"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 9
+    fig_height: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(data.table)
+library(ggplot2)
+
+source("orei_geno_import.R")
+
+# ── QC thresholds (adjust as needed) ─────────────────────────────────────────
+MISS_MK  <- 0.10   # max missing rate per marker
+MAF_MIN  <- 0.05   # min MAF per marker
+CR_SAMP  <- 0.80   # min call rate per sample
+HET_SAMP <- 0.15   # max observed heterozygosity per sample
+
+theme_set(theme_bw(base_size = 12))
+```
+
+## 1  Data Overview
+
+```{r overview}
+overview <- data.frame(
+  Item  = c("Markers", "Chromosomes", "Samples (total)",
+            "Samples passing array QC", "Samples failing array QC"),
+  Count = c(
+    nrow(marker_qc),
+    length(unique(marker_qc$chrom)),
+    nrow(sample_qc),
+    sum( sample_qc$qc_pass_array, na.rm = TRUE),
+    sum(!sample_qc$qc_pass_array, na.rm = TRUE)
+  )
+)
+knitr::kable(overview, align = "lr")
+```
+
+Markers per chromosome:
+
+```{r chrom_counts}
+chrom_counts <- marker_qc[, .N, by = chrom][order(chrom)]
+knitr::kable(chrom_counts, col.names = c("Chromosome", "Markers"), align = "lr")
+```
+
+---
+
+## 2  Sample QC
+
+### 2.1  Call Rate
+
+```{r sample_callrate, fig.height=4}
+cr_threshold <- CR_SAMP
+
+ggplot(sample_qc, aes(call_rate_geno)) +
+  geom_histogram(bins = 60, fill = "steelblue", colour = "white", linewidth = 0.2) +
+  geom_vline(xintercept = cr_threshold, colour = "firebrick", linetype = "dashed") +
+  annotate("text", x = cr_threshold - 0.005, y = Inf,
+           label = paste0("threshold = ", cr_threshold),
+           colour = "firebrick", hjust = 1, vjust = 1.5, size = 3.5) +
+  labs(x = "Call rate (from genotype matrix)", y = "Samples",
+       title = "Sample call-rate distribution")
+```
+
+```{r sample_callrate_table}
+cat(sprintf("Samples below %.0f%% call rate: %d / %d\n",
+            cr_threshold * 100,
+            sum(sample_qc$call_rate_geno < cr_threshold),
+            nrow(sample_qc)))
+```
+
+### 2.2  Heterozygosity
+
+Barley is an inbreeding species; DH/RIL lines carry near-zero heterozygosity. Elevated heterozygosity flags potential contamination, sample mix-ups, or early-generation material.
+
+```{r sample_het, fig.height=4}
+ggplot(sample_qc, aes(obs_het)) +
+  geom_histogram(bins = 60, fill = "steelblue", colour = "white", linewidth = 0.2) +
+  geom_vline(xintercept = HET_SAMP, colour = "firebrick", linetype = "dashed") +
+  annotate("text", x = HET_SAMP + 0.002, y = Inf,
+           label = paste0("threshold = ", HET_SAMP),
+           colour = "firebrick", hjust = 0, vjust = 1.5, size = 3.5) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Observed heterozygosity", y = "Samples",
+       title = "Sample heterozygosity distribution")
+```
+
+### 2.3  Call Rate vs Heterozygosity
+
+```{r cr_vs_het}
+sample_qc[, flag := fcase(
+  call_rate_geno < CR_SAMP & obs_het > HET_SAMP, "fail: low CR + high het",
+  call_rate_geno < CR_SAMP,                       "fail: low call rate",
+  obs_het        > HET_SAMP,                      "fail: high heterozygosity",
+  default = "pass"
+)]
+
+ggplot(sample_qc, aes(call_rate_geno, obs_het, colour = flag)) +
+  geom_point(alpha = 0.55, size = 1.4) +
+  scale_colour_manual(values = c(
+    "pass"                    = "grey60",
+    "fail: low call rate"     = "#E69F00",
+    "fail: high heterozygosity" = "#56B4E9",
+    "fail: low CR + high het" = "firebrick"
+  )) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  geom_vline(xintercept = CR_SAMP,  linetype = "dashed", colour = "grey40") +
+  geom_hline(yintercept = HET_SAMP, linetype = "dashed", colour = "grey40") +
+  labs(x = "Call rate", y = "Observed heterozygosity",
+       colour = "QC status",
+       title = "Sample QC: call rate vs heterozygosity")
+```
+
+### 2.4  Flagged Samples
+
+```{r flagged_samples}
+flagged <- sample_qc[flag != "pass",
+                     .(sample_id, plate, call_rate_geno, obs_het, flag)]
+flagged[, call_rate_geno := round(call_rate_geno, 4)]
+flagged[, obs_het        := round(obs_het,        4)]
+setorder(flagged, flag, call_rate_geno)
+
+cat(sprintf("Total flagged samples: %d\n", nrow(flagged)))
+if (nrow(flagged) > 0) {
+  knitr::kable(flagged, col.names = c("Sample ID", "Plate", "Call rate",
+                                      "Obs. het", "Flag"))
+}
+```
+
+---
+
+## 3  Marker QC
+
+### 3.1  Missing Rate
+
+```{r marker_miss, fig.height=4}
+ggplot(marker_qc, aes(miss_rate)) +
+  geom_histogram(bins = 60, fill = "steelblue", colour = "white", linewidth = 0.2) +
+  geom_vline(xintercept = MISS_MK, colour = "firebrick", linetype = "dashed") +
+  annotate("text", x = MISS_MK + 0.003, y = Inf,
+           label = paste0("threshold = ", MISS_MK),
+           colour = "firebrick", hjust = 0, vjust = 1.5, size = 3.5) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Missing rate", y = "Markers",
+       title = "Marker missing-rate distribution")
+```
+
+```{r marker_miss_summary}
+cat(sprintf("Markers above %.0f%% missing: %d / %d\n",
+            MISS_MK * 100, sum(marker_qc$miss_rate > MISS_MK), nrow(marker_qc)))
+```
+
+### 3.2  Minor Allele Frequency
+
+```{r marker_maf, fig.height=4}
+ggplot(marker_qc, aes(maf)) +
+  geom_histogram(bins = 60, fill = "steelblue", colour = "white", linewidth = 0.2) +
+  geom_vline(xintercept = MAF_MIN, colour = "firebrick", linetype = "dashed") +
+  annotate("text", x = MAF_MIN + 0.003, y = Inf,
+           label = paste0("threshold = ", MAF_MIN),
+           colour = "firebrick", hjust = 0, vjust = 1.5, size = 3.5) +
+  labs(x = "Minor allele frequency", y = "Markers",
+       title = "MAF distribution")
+```
+
+```{r marker_maf_summary}
+cat(sprintf("Markers MAF < %.2f : %d / %d\n",
+            MAF_MIN, sum(marker_qc$maf < MAF_MIN, na.rm = TRUE), nrow(marker_qc)))
+cat(sprintf("Monomorphic (MAF = 0): %d\n",
+            sum(marker_qc$maf == 0, na.rm = TRUE)))
+```
+
+### 3.3  Marker Heterozygosity
+
+```{r marker_het, fig.height=4}
+ggplot(marker_qc, aes(obs_het)) +
+  geom_histogram(bins = 60, fill = "steelblue", colour = "white", linewidth = 0.2) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Observed heterozygosity", y = "Markers",
+       title = "Marker heterozygosity distribution")
+```
+
+### 3.4  Chromosomal Distribution
+
+```{r chrom_dist, fig.height=4}
+marker_qc[, chrom_label := sub("chr", "", chrom)]
+
+ggplot(marker_qc, aes(pos / 1e6, fill = chrom_label)) +
+  geom_histogram(bins = 50, colour = "white", linewidth = 0.1) +
+  facet_wrap(~chrom_label, nrow = 1) +
+  scale_fill_brewer(palette = "Set1", guide = "none") +
+  labs(x = "Physical position (Mb)", y = "Markers",
+       title = "Marker distribution across chromosomes (Morex V3)")
+```
+
+---
+
+## 4  QC Filtering
+
+```{r apply_filters}
+pass_samples <- sample_qc[call_rate_geno >= CR_SAMP & obs_het <= HET_SAMP, sample_id]
+pass_markers <- marker_qc[miss_rate <= MISS_MK & maf >= MAF_MIN,          marker_id]
+
+geno_filt <- geno_mat[pass_markers, pass_samples]
+
+filter_summary <- data.frame(
+  Step      = c("Input markers", "After miss-rate filter",
+                "After MAF filter", "Final markers",
+                "Input samples", "After call-rate filter",
+                "After het filter",  "Final samples"),
+  Count = c(
+    nrow(marker_qc),
+    sum(marker_qc$miss_rate <= MISS_MK),
+    sum(marker_qc$miss_rate <= MISS_MK & marker_qc$maf >= MAF_MIN),
+    length(pass_markers),
+    nrow(sample_qc),
+    sum(sample_qc$call_rate_geno >= CR_SAMP),
+    sum(sample_qc$call_rate_geno >= CR_SAMP & sample_qc$obs_het <= HET_SAMP),
+    length(pass_samples)
+  )
+)
+knitr::kable(filter_summary, align = "lr")
+```
+
+---
+
+## 5  PCA
+
+Missing values in the filtered matrix are imputed per-marker with the marker mean before PCA.
+
+```{r pca_compute}
+# Impute missing with marker mean (row-wise)
+impute_mean <- function(mat) {
+  row_means <- rowMeans(mat, na.rm = TRUE)
+  idx <- which(is.na(mat), arr.ind = TRUE)
+  mat[idx] <- row_means[idx[, 1]]
+  mat
+}
+
+geno_imp <- impute_mean(geno_filt)
+
+pca_res <- prcomp(t(geno_imp), center = TRUE, scale. = FALSE)
+
+pve <- pca_res$sdev^2 / sum(pca_res$sdev^2) * 100
+
+pca_dt <- as.data.table(pca_res$x[, 1:10])
+pca_dt[, sample_id := rownames(pca_res$x)]
+pca_dt <- merge(pca_dt, sample_qc[, .(sample_id, plate, call_rate_geno)],
+                by = "sample_id")
+```
+
+### 5.1  Scree Plot
+
+```{r scree, fig.height=4, fig.width=6}
+scree_dt <- data.table(PC = 1:20, PVE = pve[1:20])
+
+ggplot(scree_dt, aes(PC, PVE)) +
+  geom_col(fill = "steelblue", width = 0.7) +
+  geom_line(aes(group = 1), colour = "grey30") +
+  geom_point(colour = "grey30") +
+  labs(x = "Principal component", y = "Variance explained (%)",
+       title = "Scree plot – top 20 PCs")
+```
+
+### 5.2  PC1 vs PC2 – Coloured by Plate
+
+```{r pca_pc1_pc2}
+ggplot(pca_dt, aes(PC1, PC2, colour = plate)) +
+  geom_point(alpha = 0.65, size = 1.6) +
+  labs(x = sprintf("PC1 (%.1f%%)", pve[1]),
+       y = sprintf("PC2 (%.1f%%)", pve[2]),
+       colour = "Plate",
+       title = "PCA – PC1 vs PC2 coloured by plate") +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 7))
+```
+
+### 5.3  PC1 vs PC3
+
+```{r pca_pc1_pc3}
+ggplot(pca_dt, aes(PC1, PC3, colour = plate)) +
+  geom_point(alpha = 0.65, size = 1.6) +
+  labs(x = sprintf("PC1 (%.1f%%)", pve[1]),
+       y = sprintf("PC3 (%.1f%%)", pve[3]),
+       colour = "Plate",
+       title = "PCA – PC1 vs PC3") +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 7))
+```
+
+### 5.4  PC1 vs PC2 – Coloured by Call Rate
+
+```{r pca_callrate}
+ggplot(pca_dt, aes(PC1, PC2, colour = call_rate_geno)) +
+  geom_point(alpha = 0.65, size = 1.6) +
+  scale_colour_viridis_c(option = "plasma", labels = scales::percent_format(),
+                         name = "Call rate") +
+  labs(x = sprintf("PC1 (%.1f%%)", pve[1]),
+       y = sprintf("PC2 (%.1f%%)", pve[2]),
+       title = "PCA – call rate overlay (checks for quality-driven structure)")
+```
+
+---
+
+## 6  Linkage Disequilibrium
+
+Pairwise r² computed for all marker pairs within each chromosome using QC-filtered markers and samples. Decay curves show median r² in 2 Mb distance bins.
+
+```{r ld_compute, cache=TRUE}
+marker_filt <- marker_qc[marker_id %in% pass_markers]
+
+ld_all <- rbindlist(lapply(sort(unique(marker_filt$chrom)), function(chr) {
+
+  mk_chr <- marker_filt[chrom == chr]
+  if (nrow(mk_chr) < 2) return(NULL)
+
+  m   <- geno_filt[mk_chr$marker_id, , drop = FALSE]
+  pos <- mk_chr$pos
+
+  # use pairwise.complete for any residual missing data after filtering
+  r_mat  <- cor(t(m), use = "pairwise.complete.obs")
+  r2_mat <- r_mat^2
+
+  upper <- upper.tri(r2_mat)
+  idx   <- which(upper, arr.ind = TRUE)
+
+  data.table(
+    chrom      = chr,
+    chrom_label = sub("chr", "", chr),
+    dist_bp    = abs(pos[idx[, 2]] - pos[idx[, 1]]),
+    r2         = r2_mat[upper]
+  )
+}))
+
+# Bin into 2 Mb windows
+ld_all[, dist_bin := floor(dist_bp / 2e6) * 2]
+ld_bin <- ld_all[, .(
+  med_r2  = median(r2, na.rm = TRUE),
+  mean_r2 = mean(r2,   na.rm = TRUE),
+  n_pairs = .N
+), by = .(chrom_label, dist_bin)]
+```
+
+### 6.1  LD Decay – All Chromosomes
+
+```{r ld_decay_all, fig.height=5}
+ggplot(ld_bin[dist_bin <= 200], aes(dist_bin, med_r2, colour = chrom_label,
+                                     group = chrom_label)) +
+  geom_line(linewidth = 0.8, alpha = 0.85) +
+  geom_point(size = 1.2, alpha = 0.7) +
+  scale_colour_brewer(palette = "Set1", name = "Chromosome") +
+  labs(x = "Physical distance (Mb)", y = expression(paste("Median ", r^2)),
+       title = "LD decay by chromosome (2 Mb bins)") +
+  coord_cartesian(ylim = c(0, 1))
+```
+
+### 6.2  LD Decay – Faceted by Chromosome
+
+```{r ld_decay_facet, fig.height=6}
+ggplot(ld_bin[dist_bin <= 200], aes(dist_bin, med_r2)) +
+  geom_line(colour = "steelblue", linewidth = 0.8) +
+  geom_point(colour = "steelblue", size = 1.0) +
+  facet_wrap(~chrom_label, nrow = 2) +
+  labs(x = "Physical distance (Mb)", y = expression(paste("Median ", r^2)),
+       title = "LD decay per chromosome") +
+  coord_cartesian(ylim = c(0, 1))
+```
+
+### 6.3  Distance at r² = 0.2
+
+```{r ld_half_decay}
+r2_threshold <- 0.2
+
+ld_decay_pt <- ld_bin[, {
+  # interpolate the distance where median r2 drops below threshold
+  above <- .SD[med_r2 >= r2_threshold]
+  if (nrow(above) == 0) {
+    .(decay_dist_mb = NA_real_)
+  } else {
+    .(decay_dist_mb = max(above$dist_bin))
+  }
+}, by = chrom_label]
+
+setorder(ld_decay_pt, chrom_label)
+ld_decay_pt[, decay_dist_mb := decay_dist_mb + 2]   # upper edge of last bin
+knitr::kable(ld_decay_pt,
+             col.names = c("Chromosome", "Distance r² ≥ 0.2 (Mb)"),
+             align = "lr",
+             caption = paste0("Physical distance (Mb) over which median r² ≥ ",
+                              r2_threshold, " (2 Mb bins)"))
+```
+
+
+### 7  Extract SNPs of interest. 
+
+```{r}
+library(readxl)
+X3K <- read_excel("3K_MAS_SNPs.xlsx")
+
+
+library(dplyr)
+
+# First filter X3K for Sorrells, then use those IDs to subset geno_mat
+sorrells_ids <- X3K %>%
+  filter(Contributor == "Sorrells") %>%
+  pull(ID)
+
+SNP_analysis <- geno_mat[rownames(geno_mat) %in% sorrells_ids, ]
+
+allele_counts_df <- data.frame(
+  ID = rownames(SNP_analysis),
+  AA = rowSums(SNP_analysis == 0, na.rm = TRUE),
+  Aa = rowSums(SNP_analysis == 1, na.rm = TRUE),
+  aa = rowSums(SNP_analysis == 2, na.rm = TRUE),
+  missing = rowSums(is.na(SNP_analysis))
+)
+
+print(allele_counts_df)
+writexl::write_xlsx(allele_counts_df, path= "sorrells_3k_calls.xlsx")
+
+save(geno_mat, file = "3K_G_mat.Rdata")
+```
+
+---
+
+## 8  Session Info
+
+```{r session_info}
+sessionInfo()
+
+```

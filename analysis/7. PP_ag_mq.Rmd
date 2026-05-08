@@ -208,7 +208,7 @@ data_mq<- data_mq%>%
   pivot_longer(cols = all_of(traits_mq), names_to = "VI", values_to = "Predicted")
 
 #prepare agronomic BLUE traits
-load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+load("data/ag_BLUE_spatial.RData")
 
 data_ag_pr <- preds[,-5] %>% filter(VI %in% traits_ag )%>% pivot_wider(names_from = "VI", values_from = "Predicted")
 
@@ -225,10 +225,10 @@ data_ag_pr <- preds[,-5] %>% filter(VI %in% traits_ag )%>% pivot_wider(names_fro
 **Run the predicton for agronomic traits RAW**
 
 ```{r}
-PP_LM_results_ag_raw  <- run_pheno_models_long(data_ag, VImats, model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 50)
+PP_LM_results_ag_raw  <- run_pheno_models_long(data_ag, VImats, model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 5)
 
 #hist(PP_LM_results_ag_raw$accuracy$Accuracy)
-save(PP_LM_results_ag_raw, file = file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
+save(PP_LM_results_ag_raw, file= "PP_LM_results_ag_raw.Rdata")
 #table(PP_LM_results_ag_raw$accuracy$Environment, PP_LM_results_ag_raw$accuracy$Trait)
 #boxplot(PP_LM_results_ag_raw$accuracy$Accuracy~ PP_LM_results_ag_raw$accuracy$Trait)
 ```
@@ -241,7 +241,7 @@ save(PP_LM_results_ag_raw, file = file.path(base_path, "output/PP_LM_results_ag_
 ```{r}
 PP_LM_results_mq_raw  <- run_pheno_models_long(data_mq, VImats[c(1,3)], model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 50)
 
-save(PP_LM_results_mq_raw, file = file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
+save(PP_LM_results_mq_raw, file= "PP_LM_results_mq_raw.Rdata")
 ```
 
 
@@ -251,7 +251,8 @@ save(PP_LM_results_mq_raw, file = file.path(base_path, "output/PP_LM_results_mq_
 
 ```{r}
 # Define parameters
-load(file.path(base_path, "data/VImatBLUE.Rdata"))
+load("~/data/VImatBLUE.Rdata")
+#load("C:/Users/Siim Sepp/NY_WMB/data/VImatBLUE.Rdata")
 VIs<- names(VImats$KET21)[-3]
 
 cycles <- 50
@@ -289,15 +290,13 @@ for (env_idx in names(VImats)) {
       cols <- c("S.T", colnames(predictor_data)[-1])
       cols <- cols[cols %in% colnames(merged_data)]
       merged_data <- merged_data[, cols]
-      merged_data <- merged_data %>% na.omit()
-      if (nrow(merged_data) < 10) next
-
+      
       for (r in 1:cycles) {
         set.seed(r)
-
+        
         ind <- createDataPartition(merged_data$S.T, p = 0.8, list = FALSE)
-        train <- merged_data[ind, ]
-        test  <- merged_data[-ind, ]
+        train <- merged_data[ind, ]  
+        test  <- merged_data[-ind, ] 
         
         # Pre-clean predictors
         nzv <- nearZeroVar(train, saveMetrics = TRUE)
@@ -453,8 +452,8 @@ accuracy_results <- do.call(rbind, accuracy_list)
 var_importance_results <- do.call(rbind, var_importance_list)
 prediction_results <- do.call(rbind, prediction_list)
 
-PP_LM_results_ag_pred <- list(accuracy_results, var_importance_results, prediction_results)
-save(PP_LM_results_ag_pred, file = file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
+PP_LM_results_ag_pred <- list(accuracy_results, var_importance_results, prediction_results) 
+save(PP_LM_results_ag_pred, file= "PP_LM_results_ag_pred.Rdata")
 ```
 
 
@@ -464,7 +463,8 @@ save(PP_LM_results_ag_pred, file = file.path(base_path, "output/PP_LM_results_ag
 
 ```{r}
 # Define parameters
-load(file.path(base_path, "data/VImatBLUE.Rdata"))
+#load("~/data/VImatBLUE.Rdata")
+load("C:/Users/Siim Sepp/NY_WMB/data/VImatBLUE.Rdata")
 
 cycles <- 5
 
@@ -502,9 +502,7 @@ for (env_idx in names(VImats)[4]) {
       cols <- c("ST", colnames(predictor_data)[-1])
       cols <- cols[cols %in% colnames(merged_data)]
       merged_data <- merged_data[, cols]
-      merged_data <- merged_data %>% na.omit()
-      if (nrow(merged_data) < 10) next
-
+      
       for (r in 1:cycles) {
         set.seed(r)
         
@@ -526,17 +524,17 @@ for (env_idx in names(VImats)[4]) {
             for (alpha_val in c(0, 0.5, 1)) {
               model <- tryCatch(
                 train(
-                  ST ~ ., data = train, method = "glmnet",
+                  S.T ~ ., data = train, method = "glmnet",
                   tuneGrid = expand.grid(alpha = alpha_val,
                                          lambda = seq(0.0001, 1, length = 10)),
                   trControl = custom
                 ),
                 error = function(e) NULL
               )
-
+              
               if (!is.null(model)) {
                 model_pred <- tryCatch(predict(model, test), error = function(e) rep(NA, nrow(test)))
-
+                
                 if (!all(is.na(model_pred))) {
                   model_acc <- cor(model_pred, test$ST, use = "complete.obs")
                 } else {
@@ -666,8 +664,8 @@ accuracy_results <- do.call(rbind, accuracy_list)
 var_importance_results <- do.call(rbind, var_importance_list)
 prediction_results <- do.call(rbind, prediction_list)
 
-PP_LM_results_mq_pred <- list(accuracy_results, var_importance_results, prediction_results)
-save(PP_LM_results_mq_pred, file = file.path(base_path, "output/PP_LM_results_mq_pred.Rdata"))
+PP_LM_results_mq_pred <- list(accuracy_results, var_importance_results, prediction_results) 
+save(PP_LM_results_mq_pred, file= "PP_LM_results_mq_pred.Rdata")
 ```
 
 
@@ -679,10 +677,11 @@ save(PP_LM_results_mq_pred, file = file.path(base_path, "output/PP_LM_results_mq
 
 **Ordering and cleaning the var importance scores**
 ```{r}
-load(file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
-load(file.path(base_path, "output/PP_LM_results_mq_pred.Rdata"))
-load(file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
-load(file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
+#load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_var_importance_scores_ag.RData")
+load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_ag_pred.RData")
+load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_mq_pred.RData")
+load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_mq_raw.Rdata")
+load("C:/Users/Siim Sepp/NY_WMB/analysis/PP_LM_results_ag_raw.Rdata")
 
 PP_LM_results_ag_raw$importance$met<- "raw" 
 PP_LM_results_mq_raw$importance$met<- "raw" 
@@ -747,7 +746,7 @@ var_importance_results <- var_importance_results %>%
 **Plotting Smooth varimp scores over envs, models, VIs and traits. **
 ```{r}
 
-load(file.path(base_path, "JD_map.Rdata"))
+load("C:/Users/Siim Sepp/NY_WMB/JD_map.Rdata")
 colnames(var_importance_results)[6]<- "Timepoint"
 
 var_importance_results<- var_importance_results %>% left_join(JD_map, by= c("Environment", "Timepoint"))
@@ -783,16 +782,14 @@ month_labels <- data.frame(
 
 p <- ggplot(var_importance_plot,
        aes(x = DOY, y = Importance, color = Environment, fill = Environment)) +
-  geom_smooth(se = FALSE, linewidth = 2, method = "loess", span = 0.6,
-              linewidth = 1.2) +
+  geom_smooth(se = FALSE, linewidth = 2, method = "loess") +
   scale_x_continuous(
     breaks = month_labels$DOY,
     labels = month_labels$Month,
     limits = c(min(var_importance_plot$DOY) - 5, 
                max(var_importance_plot$DOY) + 5)
   ) +
-  scale_color_manual(values = pal) +
-  scale_fill_manual(values = pal) +
+  scale_color_brewer(palette = "Set3") +
   labs(
     x = "Month",
     y = "Variable Importance Score",
@@ -800,9 +797,9 @@ p <- ggplot(var_importance_plot,
     fill = "Environment"
   ) +
   theme(
-    axis.title = element_text(size = 13, face = "bold"),
-    axis.text = element_text(size = 11),
-    legend.position = "bottom"
+    axis.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 16),
+    legend.position = "bottom", legend.text = element_text(size=12)
   )
 
 print(p)
@@ -904,17 +901,13 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
       }
       
       df <- df %>% filter(plotID %in% common_gids)
-      # Remove observations with missing phenotype before fold creation
-      df <- df[!is.na(df$Predicted), , drop = FALSE]
-      if (nrow(df) < 10) {
-        cat("    Too few non-missing observations. Skipping.\n")
-        next
-      }
       df$plotID <- factor(df$plotID, levels = common_gids)
       K <- K[common_gids, common_gids]
 
-      all_cv_cor <- c()
 
+      
+      all_cv_cor <- c()
+      
       for (rep in 1:n_repeats) {
         set.seed(100 + rep)
         folds <- createFolds(df$Predicted, k = 5)
@@ -946,12 +939,7 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
           }, error = function(e) return(NULL))
           
           if (is.null(mod_cv)) next
-
-          # Run one update if model did not converge
-          if (!mod_cv$converge) {
-            mod_cv <- tryCatch(update(mod_cv), error = function(e) mod_cv)
-          }
-
+          
           pred <- tryCatch({
             predict(mod_cv, classify = "plotID")
           }, error = function(e) return(NULL))
@@ -1017,11 +1005,11 @@ run_blup_cv <- function(preds, MT_sim_mat, n_repeats = 50) {
 
 **Prepare Similarity matrices and pheno data for the MM function**
 ```{r}
-load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
-preds_ag <- preds
+load("data/ag_BLUE_spatial.RData")
+preds_ag<- preds
 
 #prep pred mat for combined and sel VIs
-load(file.path(base_path, "data/MT_pred_mat.Rdata"))
+load("data/MT_pred_mat.Rdata")
 
 names(MT_sim_mat_pr)
 MT_sim_mat_pr_comb <- MT_sim_mat_pr[6:10]
@@ -1031,7 +1019,7 @@ MT_sim_mat_pr_sel <- MT_sim_mat_pr[c(4,1,3,5,2)]
 names(MT_sim_mat_pr_sel)<- c("MCG25","HELF24", "MCG23","SNY22", "KET21")
 
 #prep raw mat for combined and sel VIs
-load(file.path(base_path, "data/MT_raw_mat.Rdata"))
+load("data/MT_raw_mat.Rdata")
 
 names(MT_sim_mat_raw)
 
@@ -1053,7 +1041,7 @@ tr<- unique(preds$VI)[-2:-3]
 preds_ag<- preds_ag %>% filter(VI %in% tr)
 
 PP_MM_results_ag_pred_comb <- run_blup_cv(preds_ag, MT_sim_mat_pr_comb)
-save(PP_MM_results_ag_pred_comb, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb.Rdata"))
+save(PP_MM_results_ag_pred_comb, file = "PP_MM_results_ag_pred_comb.Rdata")
 ```
 
 
@@ -1064,7 +1052,7 @@ save(PP_MM_results_ag_pred_comb, file = file.path(base_path, "output/PP_MM_resul
 ```{r}
 PP_MM_results_ag_pred_sel <- run_blup_cv(preds_ag, MT_sim_mat_pr_sel)
 
-save(PP_MM_results_ag_pred_sel, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel.Rdata"))
+save(PP_MM_results_ag_pred_sel, file = "PP_MM_results_ag_pred_sel.Rdata")
 ```
 
 
@@ -1073,15 +1061,15 @@ save(PP_MM_results_ag_pred_sel, file = file.path(base_path, "output/PP_MM_result
 #**PP within env VIs for agronomic traits with RAW comb**
 
 ```{r}
-load(file.path(base_path, "data/data_ag.Rdata"))
+load("C:/Users/Siim Sepp/NY_WMB/data/data_ag.Rdata")
 
-tr <- colnames(data_ag)[c(7,8)]
+tr<- colnames(data_ag)[c(7,8)]
 
 data_ag<- data_ag[,c(-2,-4,-9,-10)] %>% pivot_longer(values_to = "Predicted", names_to = "VI", cols = tr)
 
 PP_MM_results_ag_raw_comb <- run_blup_cv(data_ag, MT_sim_mat_raw_comb)
 
-save(PP_MM_results_ag_raw_comb, file = file.path(base_path, "output/PP_MM_results_ag_raw_comb.Rdata"))
+save(PP_MM_results_ag_raw_comb, file = "PP_MM_results_ag_raw_comb.Rdata")
 ```
 
 
@@ -1091,7 +1079,7 @@ save(PP_MM_results_ag_raw_comb, file = file.path(base_path, "output/PP_MM_result
 
 ```{r}
 PP_MM_results_ag_raw_sel <- run_blup_cv(data_ag, MT_sim_mat_raw_sel)
-save(PP_MM_results_ag_raw_sel, file = file.path(base_path, "output/PP_MM_results_ag_raw_sel.Rdata"))
+save(PP_MM_results_ag_raw_sel, file = "PP_MM_results_ag_raw_sel.Rdata")
 ```
 
 
@@ -1100,13 +1088,13 @@ save(PP_MM_results_ag_raw_sel, file = file.path(base_path, "output/PP_MM_results
 **PP within env  VIs for MQ traits with RAW comb**
 
 ```{r}
-load(file.path(base_path, "data/data_mq.Rdata"))
+load("C:/Users/Siim Sepp/NY_WMB/data/data_mq.Rdata")
 
-tr <- colnames(data_mq)[4:15]
+tr<- colnames(data_mq)[4:15]
 data_mq<- data_mq %>% pivot_longer(values_to = "Predicted", names_to = "VI", cols = tr)
 
 PP_MM_results_MQ_raw_comb <- run_blup_cv(data_mq, MT_sim_mat_raw_comb)
-save(PP_MM_results_MQ_raw_comb, file = file.path(base_path, "output/PP_MM_results_MQ_raw_comb.Rdata"))
+save(PP_MM_results_MQ_raw_comb, file = "PP_MM_results_MQ_raw_comb.Rdata")
 ```
 
 
@@ -1116,7 +1104,7 @@ save(PP_MM_results_MQ_raw_comb, file = file.path(base_path, "output/PP_MM_result
 
 ```{r}
 PP_MM_results_MQ_raw_sel <- run_blup_cv(data_mq, MT_sim_mat_raw_sel)
-save(PP_MM_results_MQ_raw_sel, file = file.path(base_path, "output/PP_MM_results_MQ_raw_sel.Rdata"))
+save(PP_MM_results_MQ_raw_sel, file = "PP_MM_results_MQ_raw_sel.Rdata")
 
 
 #PP_MM_results_MQ_pred_sel <- run_blup_cv(preds, MT_sim_mat_pr_sel)
@@ -1307,13 +1295,6 @@ run_blup_cv2_phenoK_globalK <- function(preds, MT_sim_mat,
 
         out <- merge(test_rows, pred[, c("plotID", "u_hat")], by = "plotID", all.x = TRUE)
 
-        # u_hat is per GID (same value for all envs of that GID).  Aggregate
-        # phenotypes to GID level so the correlation is at the genotype level —
-        # the valid CV metric when predictions are genotype-level BVs.
-        out_pheno <- aggregate(Predicted ~ plotID, data = out, FUN = mean, na.rm = TRUE)
-        out_bv    <- out[!duplicated(out$plotID), c("plotID", "u_hat")]
-        out       <- merge(out_pheno, out_bv, by = "plotID")
-
         results <- rbind(results, data.frame(
           Trait  = trait,
           RepRun = rep,
@@ -1346,7 +1327,7 @@ cv2_global_f1 <- run_blup_cv2_phenoK_globalK(
 
 boxplot(cv2_global_f1$results$Cor)
 PP_MM_results_ag_pred_comb_CV2_f1 <- cv2_global_f1
-save(PP_MM_results_ag_pred_comb_CV2_f1, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb_CV2_f1.Rdata"))
+save(PP_MM_results_ag_pred_comb_CV2_f1, file = "PP_MM_results_ag_pred_comb_CV2_f1.Rdata")
 ```
 
 
@@ -1358,7 +1339,7 @@ cv2_global_f05 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 0.5 )
 
 PP_MM_results_ag_pred_comb_CV2_f05 <- cv2_global_f05
-save(PP_MM_results_ag_pred_comb_CV2_f05, file = file.path(base_path, "output/PP_MM_results_ag_pred_comb_CV2_f05.Rdata"))
+save(PP_MM_results_ag_pred_comb_CV2_f05, file = "PP_MM_results_ag_pred_comb_CV2_f05.Rdata")
 ```
 
 
@@ -1370,7 +1351,7 @@ cv2_global_f1 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 1 )
 
 PP_MM_results_ag_pred_sel_CV2_f1 <- cv2_global_f1
-save(PP_MM_results_ag_pred_sel_CV2_f1, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel_CV2_f1.Rdata"))
+save(PP_MM_results_ag_pred_sel_CV2_f1, file = "PP_MM_results_ag_pred_sel_CV2_f1.Rdata")
 ```
 
 
@@ -1382,6 +1363,339 @@ cv2_global_f05 <- run_blup_cv2_phenoK_globalK(
   mask_frac = 0.5 )
 
 PP_MM_results_ag_pred_sel_CV2_f05 <- cv2_global_f05
-save(PP_MM_results_ag_pred_sel_CV2_f05, file = file.path(base_path, "output/PP_MM_results_ag_pred_sel_CV2_f05.Rdata"))
+save(PP_MM_results_ag_pred_sel_CV2_f05, file = "PP_MM_results_ag_pred_sel_CV2_f05.Rdata")
+```
+
+
+
+
+# **6. Ensemble models: stacking and averaging across base learners**
+
+
+**Load raw prediction results**
+
+```{r}
+analysis_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/NY_WMBCL/analysis/"
+} else {
+  "~/Documents/GitHub/NY_WMBCL/analysis/"
+}
+
+load(file.path(analysis_path, "PP_LM_results_ag_raw.Rdata"))
+load(file.path(analysis_path, "PP_LM_results_mq_raw.Rdata"))
+```
+
+
+
+
+**Ensemble builder function**
+
+Builds three ensembles from the per-cycle held-out predictions stored in any `run_pheno_models_long` result:
+- **Mean**: unweighted average of all base model predictions
+- **Weighted**: accuracy-weighted average (weights = mean r across cycles, zero-floored)
+- **Stacked**: ridge regression meta-learner trained on the first half of cycles, evaluated on the second half
+
+```{r}
+build_ensemble_accuracy <- function(pred_df, acc_df) {
+
+  # Align test-set rows across models via obs_id within each (Env, Cycle, Trait, PredSet, Model)
+  pred_wide <- pred_df %>%
+    group_by(Environment, Cycle, Trait, Predictor_Set, Model) %>%
+    mutate(obs_id = row_number()) %>%
+    ungroup() %>%
+    pivot_wider(
+      id_cols    = c(Environment, Cycle, Trait, Predictor_Set, obs_id, True),
+      names_from  = Model,
+      values_from = Predicted
+    )
+
+  model_cols <- setdiff(names(pred_wide),
+                        c("Environment", "Cycle", "Trait", "Predictor_Set", "obs_id", "True"))
+  model_cols <- model_cols[sapply(pred_wide[model_cols], is.numeric)]
+
+  if (length(model_cols) < 2) {
+    warning("Need >= 2 models for ensemble; returning NULL.")
+    return(NULL)
+  }
+
+  # Weights proportional to mean accuracy (zero-floored, normalised)
+  w_tbl <- acc_df %>%
+    group_by(Model) %>%
+    summarise(w = pmax(mean(Accuracy, na.rm = TRUE), 0), .groups = "drop") %>%
+    filter(Model %in% model_cols)
+
+  weight_vec <- setNames(w_tbl$w, w_tbl$Model)[model_cols]
+  weight_vec[is.na(weight_vec)] <- 0
+  total_w <- sum(weight_vec)
+  if (total_w == 0) weight_vec[] <- 1 / length(model_cols) else weight_vec <- weight_vec / total_w
+
+  # NA-safe weighted row mean
+  weighted_row_mean <- function(mat, wv) {
+    apply(mat, 1, function(x) {
+      ok <- !is.na(x)
+      if (!any(ok)) return(NA_real_)
+      sum(x[ok] * wv[ok]) / sum(wv[ok])
+    })
+  }
+
+  pred_mat <- as.matrix(pred_wide[, model_cols])
+  pred_wide$Ensemble_Mean     <- rowMeans(pred_mat, na.rm = TRUE)
+  pred_wide$Ensemble_Weighted <- weighted_row_mean(pred_mat, weight_vec)
+
+  # Stacked ensemble: ridge meta-learner trained on first half of cycles
+  all_cycles         <- sort(unique(pred_wide$Cycle))
+  split_idx          <- ceiling(length(all_cycles) / 2)
+  stacker_train_cyc  <- all_cycles[seq_len(split_idx)]
+  stacker_test_cyc   <- all_cycles[(split_idx + 1):length(all_cycles)]
+
+  pred_wide$Ensemble_Stacked <- NA_real_
+
+  groups <- pred_wide %>%
+    distinct(Trait, Predictor_Set, Environment) %>%
+    unite("grp_key", Trait, Predictor_Set, Environment, sep = "|", remove = FALSE)
+
+  for (i in seq_len(nrow(groups))) {
+    g <- groups[i, ]
+    idx_all   <- pred_wide$Trait == g$Trait &
+                 pred_wide$Predictor_Set == g$Predictor_Set &
+                 pred_wide$Environment == g$Environment
+    idx_train <- idx_all & pred_wide$Cycle %in% stacker_train_cyc
+    idx_test  <- idx_all & pred_wide$Cycle %in% stacker_test_cyc
+
+    df_tr <- pred_wide[idx_train, c(model_cols, "True")] %>% tidyr::drop_na()
+    df_te <- pred_wide[idx_test,  model_cols, drop = FALSE]
+
+    if (nrow(df_tr) < 10 || nrow(df_te) < 2) next
+
+    X_tr       <- as.matrix(df_tr[, model_cols])
+    y_tr       <- df_tr$True
+    complete_te <- complete.cases(df_te)
+    X_te       <- as.matrix(df_te[complete_te, , drop = FALSE])
+
+    meta <- tryCatch(
+      glmnet::cv.glmnet(X_tr, y_tr, alpha = 0, nfolds = 5),
+      error = function(e) NULL
+    )
+
+    if (!is.null(meta)) {
+      stacked_preds             <- predict(meta, newx = X_te, s = "lambda.min")[, 1]
+      test_row_idx              <- which(idx_test)[complete_te]
+      pred_wide$Ensemble_Stacked[test_row_idx] <- stacked_preds
+    }
+  }
+
+  # Compute r per (Env, Cycle, Trait, PredSet) for each ensemble type
+  ensemble_cols <- c("Ensemble_Mean", "Ensemble_Weighted", "Ensemble_Stacked")
+
+  acc_ens <- pred_wide %>%
+    group_by(Environment, Cycle, Trait, Predictor_Set) %>%
+    summarise(
+      across(
+        all_of(ensemble_cols),
+        ~ tryCatch(cor(.x, True, use = "complete.obs"), error = function(e) NA_real_)
+      ),
+      .groups = "drop"
+    ) %>%
+    pivot_longer(all_of(ensemble_cols), names_to = "Model", values_to = "Accuracy")
+
+  acc_ens
+}
+```
+
+
+
+
+**Run ensembles on agronomic and malt quality raw results**
+
+```{r}
+ensemble_acc_ag <- build_ensemble_accuracy(
+  PP_LM_results_ag_raw$predictions,
+  PP_LM_results_ag_raw$accuracy
+)
+
+ensemble_acc_mq <- build_ensemble_accuracy(
+  PP_LM_results_mq_raw$predictions,
+  PP_LM_results_mq_raw$accuracy
+)
+
+# Combine base-model and ensemble accuracies into a single tidy frame
+all_acc <- bind_rows(
+  mutate(PP_LM_results_ag_raw$accuracy, dataset = "Agronomic"),
+  mutate(ensemble_acc_ag,               dataset = "Agronomic"),
+  mutate(PP_LM_results_mq_raw$accuracy, dataset = "Malt Quality"),
+  mutate(ensemble_acc_mq,               dataset = "Malt Quality")
+) %>%
+  mutate(is_ensemble = grepl("^Ensemble", Model))
+
+save(ensemble_acc_ag, ensemble_acc_mq, all_acc,
+     file = file.path(analysis_path, "ensemble_results.Rdata"))
+```
+
+
+
+
+**Plot 1 – Accuracy boxplot: base models vs ensemble methods, faceted by trait**
+
+```{r}
+model_order <- all_acc %>%
+  group_by(Model) %>%
+  summarise(med = median(Accuracy, na.rm = TRUE), .groups = "drop") %>%
+  arrange(med) %>%
+  pull(Model)
+
+p1 <- all_acc %>%
+  filter(!is.na(Accuracy)) %>%
+  mutate(Model = factor(Model, levels = model_order)) %>%
+  ggplot(aes(x = Model, y = Accuracy, fill = is_ensemble)) +
+  geom_boxplot(outlier.size = 0.4, linewidth = 0.35) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  scale_fill_manual(
+    values = c("FALSE" = "#5B9BD5", "TRUE" = "#ED7D31"),
+    labels = c("Base model", "Ensemble")
+  ) +
+  facet_wrap(~ Trait, scales = "free_x", ncol = 3) +
+  coord_flip() +
+  labs(
+    x = NULL, y = "Prediction accuracy (r)",
+    fill  = "Model type",
+    title = "Prediction accuracy: base models vs ensemble methods"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    strip.text      = element_text(face = "bold"),
+    legend.position = "bottom",
+    axis.text.y     = element_text(size = 8)
+  )
+
+print(p1)
+```
+
+
+
+
+**Plot 2 – Mean accuracy heatmap: trait × model**
+
+```{r}
+base_model_levels <- c("Linear Regression", "Ridge", "ElasticNet",
+                        "Lasso", "PCR", "Random Forest")
+ens_model_levels  <- c("Ensemble_Mean", "Ensemble_Weighted", "Ensemble_Stacked")
+
+mean_acc <- all_acc %>%
+  group_by(dataset, Trait, Model) %>%
+  summarise(mean_r = mean(Accuracy, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Model = factor(Model, levels = c(base_model_levels, ens_model_levels)))
+
+p2 <- ggplot(mean_acc, aes(x = Model, y = Trait, fill = mean_r)) +
+  geom_tile(colour = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.2f", mean_r)), size = 2.8, colour = "black") +
+  scale_fill_gradient2(
+    low      = "#d73027",
+    mid      = "#ffffbf",
+    high     = "#1a9641",
+    midpoint = 0,
+    limits   = c(-0.3, 1),
+    name     = "Mean r"
+  ) +
+  facet_wrap(~ dataset, scales = "free_y") +
+  labs(
+    x     = NULL, y = NULL,
+    title = "Mean prediction accuracy: traits × models"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    strip.text   = element_text(face = "bold"),
+    panel.grid   = element_blank()
+  )
+
+print(p2)
+```
+
+
+
+
+**Plot 3 – Ensemble gain over best individual base model, per trait**
+
+```{r}
+ensemble_gain <- all_acc %>%
+  group_by(dataset, Trait, Model) %>%
+  summarise(mean_r = mean(Accuracy, na.rm = TRUE), .groups = "drop") %>%
+  mutate(is_ensemble = grepl("^Ensemble", Model)) %>%
+  group_by(dataset, Trait) %>%
+  summarise(
+    best_base      = max(mean_r[!is_ensemble], na.rm = TRUE),
+    best_ens       = max(mean_r[is_ensemble],  na.rm = TRUE),
+    best_ens_model = Model[is_ensemble][which.max(mean_r[is_ensemble])],
+    gain           = best_ens - best_base,
+    .groups = "drop"
+  ) %>%
+  arrange(gain)
+
+p3 <- ggplot(ensemble_gain,
+             aes(x = reorder(Trait, gain), y = gain, fill = gain > 0)) +
+  geom_col(width = 0.7) +
+  geom_text(
+    aes(label  = sprintf("%+.3f", gain),
+        hjust  = ifelse(gain >= 0, -0.1, 1.1)),
+    size = 3
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(
+    values = c("TRUE" = "#2ca02c", "FALSE" = "#d62728"),
+    labels = c("Loss", "Gain"),
+    name   = NULL
+  ) +
+  facet_wrap(~ dataset, scales = "free_y") +
+  coord_flip() +
+  labs(
+    x     = NULL,
+    y     = "Accuracy gain (best ensemble − best base model)",
+    title = "Ensemble gain over best individual model"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    strip.text      = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+print(p3)
+```
+
+
+
+
+**Plot 4 – Per-predictor-set comparison: mean accuracy by model across traits**
+
+```{r}
+top_vi <- c("NDVI", "PSRI")
+
+p4 <- all_acc %>%
+  filter(!is.na(Accuracy), Predictor_Set %in% top_vi) %>%
+  group_by(dataset, Trait, Model, Predictor_Set, is_ensemble) %>%
+  summarise(mean_r = mean(Accuracy, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Model = factor(Model, levels = rev(c(base_model_levels, ens_model_levels)))) %>%
+  ggplot(aes(x = Model, y = mean_r,
+             colour = is_ensemble, shape = Predictor_Set)) +
+  geom_point(size = 2.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+  scale_colour_manual(
+    values = c("FALSE" = "#4E79A7", "TRUE" = "#E15759"),
+    labels = c("Base model", "Ensemble")
+  ) +
+  facet_wrap(~ Trait + dataset, scales = "free_x", ncol = 4) +
+  coord_flip() +
+  labs(
+    x      = NULL, y = "Mean accuracy (r)",
+    colour = "Model type", shape = "Predictor set",
+    title  = "Mean accuracy by model and VI predictor set"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    strip.text      = element_text(face = "bold", size = 8),
+    legend.position = "bottom",
+    axis.text.y     = element_text(size = 8)
+  )
+
+print(p4)
 ```
 

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Siim Sepp\\\\NY_WMBCL\\\\OREI Genotyping\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Json)",
+      "Bash(sed 's/.*\\\\.//')"
+    ]
+  }
+}

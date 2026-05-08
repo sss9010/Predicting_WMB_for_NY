@@ -1,0 +1,1 @@
+Index	Sample Well	Sample ID	VCF Name	IDnumVCF Name	Sample Plate	Call Rate	Genotype for 11_10552	GC Score for 11_10552	Array Info.Sentrix ID	Array Info.Sentrix Position
