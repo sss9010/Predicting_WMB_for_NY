@@ -1546,14 +1546,14 @@ model_order <- all_acc %>%
 p1 <- all_acc %>%
   filter(!is.na(Accuracy)) %>%
   mutate(Model = factor(Model, levels = model_order)) %>%
-  ggplot(aes(x = Model, y = Accuracy, fill = is_ensemble)) +
+  ggplot(aes(y = Model, x = Accuracy, fill = is_ensemble)) +
   geom_boxplot(outlier.size = 0.4, linewidth = 0.35) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
   scale_fill_manual(
     values = c("FALSE" = "#5B9BD5", "TRUE" = "#ED7D31"),
     labels = c("Base model", "Ensemble")
   ) +
-  facet_wrap(~ Trait, scales = "free_x", ncol = 3) +
+  facet_grid(~ Trait, scales = "free_x") +
   coord_flip() +
   labs(
     x = NULL, y = "Prediction accuracy (r)",
@@ -1562,11 +1562,12 @@ p1 <- all_acc %>%
   ) +
   theme_bw(base_size = 11) +
   theme(
-    strip.text      = element_text(face = "bold"),
+    strip.text.x      = element_text(face = "bold"),
     legend.position = "bottom",
-    axis.text.y     = element_text(size = 8)
+    axis.text.y     = element_text(size = 8), 
+    axis.text.x = element_text(angle= 90)
   )
-
+p1
 print(p1)
 ```
 
@@ -1674,7 +1675,7 @@ p4 <- all_acc %>%
   group_by(dataset, Trait, Model, Predictor_Set, is_ensemble) %>%
   summarise(mean_r = mean(Accuracy, na.rm = TRUE), .groups = "drop") %>%
   mutate(Model = factor(Model, levels = rev(c(base_model_levels, ens_model_levels)))) %>%
-  ggplot(aes(x = Model, y = mean_r,
+  ggplot(aes(y = Model, x = mean_r,
              colour = is_ensemble, shape = Predictor_Set)) +
   geom_point(size = 2.5) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
@@ -1682,7 +1683,7 @@ p4 <- all_acc %>%
     values = c("FALSE" = "#4E79A7", "TRUE" = "#E15759"),
     labels = c("Base model", "Ensemble")
   ) +
-  facet_wrap(~ Trait + dataset, scales = "free_x", ncol = 4) +
+  facet_grid(~ Trait scales = "free_x") +
   coord_flip() +
   labs(
     x      = NULL, y = "Mean accuracy (r)",
