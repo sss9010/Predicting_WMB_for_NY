@@ -267,6 +267,17 @@ print(group_levels)
 BAND_NAMES <- found_band_names
 cat("\nRows with complete band data:", nrow(model_data), "\n")
 
+# ── Compute NDVI from raw band values (before global scaling) ─────────────
+if (all(c("red", "nir") %in% names(model_data))) {
+  model_data <- model_data %>%
+    mutate(NDVI_raw = (nir - red) / (nir + red + 1e-8))
+  cat("NDVI_raw computed: min =", round(min(model_data$NDVI_raw, na.rm=TRUE), 3),
+      " mean =", round(mean(model_data$NDVI_raw, na.rm=TRUE), 3),
+      " max =", round(max(model_data$NDVI_raw, na.rm=TRUE), 3), "\n")
+} else {
+  warning("Cannot compute NDVI_raw: 'red' or 'nir' not found in band columns.")
+}
+
 # ── Save unscaled copy for per-fold scaling inside CV functions ────────────
 model_data_raw <- model_data
 
@@ -515,6 +526,54 @@ within_env_cv <- function(data_raw, trait, n_folds = 5, n_reps = 3,
         pred <- as.numeric(pred_z) * trait_sd + trait_mn
         obs  <- as.numeric(te_ten$y$squeeze()) * trait_sd + trait_mn
         tibble(Env = env_i, fold = f, rep = rep_i, n_test = length(obs),
+               r    = cor(pred, obs, use = "complete.obs"),
+               rmse = sqrt(mean((pred - obs)^2, na.rm = TRUE)))
+      })
+    })
+  })
+}
+
+# ── Linear-model LOEO CV (for NDVI baseline) ─────────────────────────────
+linreg_loeo_cv <- function(data_raw, predictor, trait) {
+  envs <- sort(unique(as.character(data_raw$Env)))
+  map_dfr(envs, function(held_env) {
+    tr <- data_raw %>% filter(Env != held_env,
+                              !is.na(.data[[predictor]]), !is.na(.data[[trait]]))
+    te <- data_raw %>% filter(Env == held_env,
+                              !is.na(.data[[predictor]]), !is.na(.data[[trait]]))
+    if (nrow(tr) < 10 || nrow(te) < 2) return(NULL)
+    fit  <- lm(as.formula(paste(trait, "~", predictor)), data = tr)
+    pred <- predict(fit, newdata = te)
+    obs  <- te[[trait]]
+    tibble(held_env = held_env, n_test = nrow(te),
+           r    = cor(pred, obs, use = "complete.obs"),
+           rmse = sqrt(mean((pred - obs)^2, na.rm = TRUE)))
+  })
+}
+
+# ── Linear-model within-env 5-fold CV by GID (for NDVI baseline) ──────────
+linreg_wenv_cv <- function(data_raw, predictor, trait,
+                           n_folds = 5, n_reps = 3) {
+  envs <- sort(unique(as.character(data_raw$Env)))
+  map_dfr(envs, function(env_i) {
+    env_df <- data_raw %>% filter(Env == env_i,
+                                  !is.na(.data[[predictor]]), !is.na(.data[[trait]]))
+    gids <- unique(env_df$GID)
+    if (length(gids) < n_folds) return(NULL)
+    map_dfr(seq_len(n_reps), function(rep_i) {
+      set.seed(rep_i * 77L)
+      shuffled <- sample(gids)
+      fold_id  <- rep(seq_len(n_folds), length.out = length(shuffled))
+      gid_fold <- tibble(GID = shuffled, fold = fold_id)
+      map_dfr(seq_len(n_folds), function(f) {
+        test_gids <- gid_fold$GID[gid_fold$fold == f]
+        tr <- env_df %>% filter(!GID %in% test_gids)
+        te <- env_df %>% filter( GID %in% test_gids)
+        if (nrow(tr) < 5 || nrow(te) < 2) return(NULL)
+        fit  <- lm(as.formula(paste(trait, "~", predictor)), data = tr)
+        pred <- predict(fit, newdata = te)
+        obs  <- te[[trait]]
+        tibble(Env = env_i, fold = f, rep = rep_i, n_test = nrow(te),
                r    = cor(pred, obs, use = "complete.obs"),
                rmse = sqrt(mean((pred - obs)^2, na.rm = TRUE)))
       })
