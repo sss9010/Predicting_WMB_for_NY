@@ -616,6 +616,31 @@ cv_wenv <- map_dfr(usable_traits, function(trait) {
 cat("Within-env CV done. Rows:", nrow(cv_wenv), "\n")
 ```
 
+```{r ndvi-baseline}
+# ── NDVI linear-regression baseline (same CV design as DNN) ─────────────
+if (!"NDVI_raw" %in% names(model_data_raw)) {
+  warning("NDVI_raw not found in model_data_raw — skipping NDVI baseline.")
+  ndvi_loeo <- tibble()
+  ndvi_wenv <- tibble()
+} else {
+  cat("Running NDVI LOEO baseline CV...\n")
+  ndvi_loeo <- map_dfr(usable_traits, function(trait) {
+    res       <- linreg_loeo_cv(model_data_raw, "NDVI_raw", trait)
+    res$trait <- trait
+    res
+  })
+  cat("NDVI LOEO done. Rows:", nrow(ndvi_loeo), "\n")
+
+  cat("Running NDVI within-env baseline CV...\n")
+  ndvi_wenv <- map_dfr(usable_traits, function(trait) {
+    res       <- linreg_wenv_cv(model_data_raw, "NDVI_raw", trait)
+    res$trait <- trait
+    res
+  })
+  cat("NDVI within-env done. Rows:", nrow(ndvi_wenv), "\n")
+}
+```
+
 # Results: Cross-Validation Accuracy
 
 ## Leave-One-Environment-Out (LOEO)
@@ -770,6 +795,137 @@ cv_scenario_tbl %>%
        colour = "CV scenario", shape = "CV scenario") +
   theme_bw(base_size = 13) +
   theme(legend.position = "bottom")
+```
+
+# NDVI Baseline Comparison
+
+NDVI-based linear regression was run under the same two CV schemes (LOEO and
+within-environment 5-fold CV by GID) as the DNN, operating on raw (unscaled)
+trait values so RMSE is directly comparable.
+
+## NDVI Baseline — LOEO
+
+```{r ndvi-loeo-table}
+if (nrow(ndvi_loeo) > 0) {
+  ndvi_loeo_fold <- ndvi_loeo %>%
+    filter(!is.na(r)) %>%
+    group_by(trait, held_env) %>%
+    summarise(r    = mean(r,    na.rm = TRUE),
+              rmse = mean(rmse, na.rm = TRUE),
+              .groups = "drop")
+
+  ndvi_loeo_summary <- ndvi_loeo_fold %>%
+    group_by(trait) %>%
+    summarise(ndvi_r    = mean(r,    na.rm = TRUE),
+              ndvi_rmse = mean(rmse, na.rm = TRUE),
+              .groups = "drop")
+
+  ndvi_loeo_summary %>%
+    kable(digits = 3,
+          col.names = c("Trait", "NDVI mean r (LOEO)", "NDVI mean RMSE"),
+          caption   = "NDVI linear regression — LOEO accuracy") %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE)
+} else {
+  cat("NDVI baseline not available.\n")
+}
+```
+
+## NDVI Baseline — Within-Environment 5-Fold CV
+
+```{r ndvi-wenv-table}
+if (nrow(ndvi_wenv) > 0) {
+  ndvi_wenv_fold <- ndvi_wenv %>%
+    filter(!is.na(r)) %>%
+    group_by(trait, Env, fold) %>%
+    summarise(r    = mean(r,    na.rm = TRUE),
+              rmse = mean(rmse, na.rm = TRUE),
+              .groups = "drop")
+
+  ndvi_wenv_summary <- ndvi_wenv_fold %>%
+    group_by(trait, Env) %>%
+    summarise(mean_r    = mean(r,    na.rm = TRUE),
+              mean_rmse = mean(rmse, na.rm = TRUE),
+              .groups   = "drop") %>%
+    group_by(trait) %>%
+    summarise(ndvi_r    = mean(mean_r,    na.rm = TRUE),
+              ndvi_rmse = mean(mean_rmse, na.rm = TRUE),
+              .groups   = "drop")
+
+  ndvi_wenv_summary %>%
+    kable(digits = 3,
+          col.names = c("Trait", "NDVI mean r (within-env)", "NDVI mean RMSE"),
+          caption   = "NDVI linear regression — within-environment 5-fold CV accuracy") %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE)
+} else {
+  cat("NDVI baseline not available.\n")
+}
+```
+
+## DNN Synthetic VI vs. NDVI — Combined Comparison
+
+```{r ndvi-dnn-comparison-table}
+if (nrow(ndvi_loeo) > 0 && nrow(ndvi_wenv) > 0) {
+  dnn_loeo_r  <- loeo_summary  %>% select(trait, dnn_loeo_r  = mean_r)
+  dnn_wenv_r  <- wenv_summary  %>% select(trait, dnn_wenv_r  = mean_r)
+  ndvi_loeo_r <- ndvi_loeo_summary %>% select(trait, ndvi_loeo_r = ndvi_r)
+  ndvi_wenv_r <- ndvi_wenv_summary %>% select(trait, ndvi_wenv_r = ndvi_r)
+
+  full_comparison <- dnn_loeo_r %>%
+    left_join(ndvi_loeo_r, by = "trait") %>%
+    left_join(dnn_wenv_r,  by = "trait") %>%
+    left_join(ndvi_wenv_r, by = "trait") %>%
+    mutate(delta_loeo = dnn_loeo_r - ndvi_loeo_r,
+           delta_wenv = dnn_wenv_r - ndvi_wenv_r)
+
+  full_comparison %>%
+    arrange(desc(delta_loeo)) %>%
+    kable(digits = 3,
+          col.names = c("Trait",
+                        "DNN r (LOEO)", "NDVI r (LOEO)", "Δr LOEO",
+                        "DNN r (within-env)", "NDVI r (within-env)", "Δr within-env"),
+          caption = "DNN Synthetic VI vs. NDVI linear regression — both CV scenarios") %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE) %>%
+    column_spec(4, bold = TRUE,
+                color = ifelse(full_comparison$delta_loeo > 0, "forestgreen", "firebrick")) %>%
+    column_spec(7, bold = TRUE,
+                color = ifelse(full_comparison$delta_wenv > 0, "forestgreen", "firebrick"))
+}
+```
+
+```{r ndvi-dnn-comparison-plot, fig.height=5, fig.cap="DNN Synthetic VI vs. NDVI linear regression — Pearson r by CV scenario"}
+if (nrow(ndvi_loeo) > 0 && nrow(ndvi_wenv) > 0 && exists("full_comparison")) {
+  plot_df <- bind_rows(
+    full_comparison %>%
+      select(trait, r = dnn_loeo_r)  %>% mutate(model = "DNN Synthetic VI",    CV = "LOEO"),
+    full_comparison %>%
+      select(trait, r = ndvi_loeo_r) %>% mutate(model = "NDVI (linear)",       CV = "LOEO"),
+    full_comparison %>%
+      select(trait, r = dnn_wenv_r)  %>% mutate(model = "DNN Synthetic VI",    CV = "Within-env 5-fold"),
+    full_comparison %>%
+      select(trait, r = ndvi_wenv_r) %>% mutate(model = "NDVI (linear)",       CV = "Within-env 5-fold")
+  )
+
+  ggplot(plot_df,
+         aes(x = r, y = reorder(trait, r, max, na.rm = TRUE),
+             colour = model, shape = model)) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+    geom_point(size = 4, alpha = 0.9) +
+    geom_line(aes(group = interaction(trait, CV)), colour = "grey60",
+              linewidth = 0.5) +
+    facet_wrap(~CV, ncol = 2) +
+    scale_colour_manual(values = c("DNN Synthetic VI" = "#e34a33",
+                                   "NDVI (linear)"    = "#3182bd")) +
+    scale_shape_manual(values  = c("DNN Synthetic VI" = 16,
+                                   "NDVI (linear)"    = 17)) +
+    labs(x = "Mean Pearson r", y = NULL,
+         title  = "DNN Synthetic VI vs. NDVI baseline",
+         colour = NULL, shape = NULL) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom")
+}
 ```
 
 # Full-Data Models and Synthetic VI Extraction
