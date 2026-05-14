@@ -62,9 +62,14 @@ representing the flight timing judged most informative per environment:
 
 ## Cross-validation
 
-Model accuracy is evaluated using **Leave-One-Group-Out (LOGO)
-cross-validation**. With five groups (one per environment), this yields five
-folds:
+Two complementary CV scenarios are implemented. In both, splits are by **GID**
+(genotype ID) to prevent data leakage, and scalers are fit on training data only
+then applied to test folds.
+
+### Leave-One-Environment-Out (LOEO)
+
+All observations from one environment are withheld; the model trains on the
+remaining four. This measures **cross-environment generalisation**.
 
 | Fold | Training environments | Validation environment |
 |------|-----------------------|------------------------|
@@ -74,11 +79,15 @@ folds:
 | 4 | HELF24, KET21, MCG23, SNY22 | MCG25 |
 | 5 | HELF24, KET21, MCG23, MCG25 | SNY22 |
 
-Each fold is repeated five times with different random training seeds to quantify
-sensitivity to weight initialisation. Performance is reported as Pearson *r* and
-RMSE on the original (back-transformed) trait scale, and is benchmarked against
-the best standard VI (NDVI, NDRE, EVI, …) fitted with simple linear regression
-under the same LOGO scheme.
+### Within-Environment 5-Fold CV (by GID)
+
+Within each environment, GIDs are shuffled and assigned to 5 folds. The model
+trains on 4/5 of GIDs and predicts the remaining 1/5. This measures
+**within-environment predictive ability** for unseen genotypes.
+
+Each scenario is repeated 3 times with different random seeds. Performance is
+Pearson *r* and RMSE on the back-transformed trait scale, benchmarked against
+linear regression on standard VIs under the same schemes.
 
 ```{r libraries}
 # ── Core data wrangling & visualisation ────────────────────────────────────
@@ -95,7 +104,7 @@ if (!requireNamespace("torch", quietly = TRUE)) {
   stop("Package 'torch' is required. Install with: install.packages('torch'); torch::install_torch()")
 }
 library(torch)
-install_torch()
+if (!torch::torch_is_installed()) torch::install_torch()
 set.seed(42)
 torch_manual_seed(42)
 ```
@@ -170,15 +179,23 @@ cat("Timepoint column:", tp_col, "\n")
 exclude_pat <- paste(c("GID","plot_id","Env","Row","Col","Timepoint","Fam",
                        "JD","DAS","GDD", BAND_NAMES, vi_candidates),
                      collapse="|")
-trait_cols <- names(pheno_raw)[
-  !grepl(exclude_pat, names(pheno_raw), ignore.case = TRUE) &
-  sapply(pheno_raw, is.numeric)
-]
+#trait_cols <- names(pheno_raw)[
+#  !grepl(exclude_pat, names(pheno_raw), ignore.case = TRUE) &
+#  sapply(pheno_raw, is.numeric)
+#]
+
+trait_cols<- colnames(pheno_raw)[19]
 cat("Candidate trait columns:\n"); print(trait_cols)
 
 # ── Environment column ─────────────────────────────────────────────────────
 env_col <- intersect(c("Env","env","environment","trial"), names(pheno_raw))[1]
 cat("Environment column:", env_col, "\n")
+
+# ── GID column ─────────────────────────────────────────────────────────────
+gid_col <- intersect(c("GID","gid","Genotype","genotype","EntryName","entry_name",
+                       "Line","line","Name","name"),
+                     names(pheno_raw))[1]
+cat("GID column:", gid_col, "\n")
 ```
 
 ```{r data-summary}
@@ -205,27 +222,33 @@ pheno_raw %>%
 
 ```{r data-prep}
 # ── Build modelling dataset ────────────────────────────────────────────────
-# band_cols: names = canonical names ("blue","red_edge",…), values = actual col names
-# dplyr::rename() with a named vector uses the convention: c(new = "old")
-found_band_names <- names(band_cols)   # canonical names that were found
+found_band_names <- names(band_cols)
 
-# Include Timepoint if present
-tp_cols_select <- if (!is.na(tp_col)) tp_col else character(0)
+tp_cols_select  <- if (!is.na(tp_col))  tp_col  else character(0)
+gid_cols_select <- if (!is.na(gid_col)) gid_col else character(0)
 
 model_data <- pheno_raw %>%
-  select(all_of(c(env_col, tp_cols_select, unname(band_cols), vi_cols, trait_cols))) %>%
+  select(all_of(c(gid_cols_select, env_col, tp_cols_select,
+                  unname(band_cols), vi_cols, trait_cols))) %>%
   rename(Env = all_of(env_col)) %>%
-  # rename actual column names → canonical BAND_NAMES (e.g. "RedEdge" → "red_edge")
   rename(all_of(band_cols)) %>%
   filter(if_all(all_of(found_band_names), ~ !is.na(.))) %>%
   mutate(Env = as.factor(Env))
 
-# Standardise the Timepoint column name
+# ── Standardise GID column name ────────────────────────────────────────────
+if (!is.na(gid_col) && gid_col %in% names(model_data) && gid_col != "GID") {
+  model_data <- model_data %>% rename(GID = all_of(gid_col))
+} else if (!"GID" %in% names(model_data)) {
+  model_data$GID <- as.character(seq_len(nrow(model_data)))
+  warning("No GID column found; using row index as GID.")
+}
+
+# ── Standardise Timepoint column name ─────────────────────────────────────
 if (!is.na(tp_col) && tp_col != "Timepoint") {
   model_data <- model_data %>% rename(Timepoint = all_of(tp_col))
 }
 if (!"Timepoint" %in% names(model_data)) {
-  model_data$Timepoint <- 1L   # dummy if missing
+  model_data$Timepoint <- 1L
   warning("No Timepoint column found; treating all rows as a single timepoint.")
 }
 
@@ -234,20 +257,20 @@ model_data <- model_data %>%
   mutate(Timepoint = as.integer(Timepoint),
          group     = paste(Env, Timepoint, sep = "_TP"))
 
-
-model_data<- model_data %>% filter(group %in% c("HELF24_TP7", "KET21_TP4", "MCG23_TP5", "MCG25_TP12", "SNY22_TP6"))  
-
+model_data <- model_data %>%
+  filter(group %in% c("HELF24_TP7","KET21_TP4","MCG23_TP5","MCG25_TP12","SNY22_TP6"))
 
 group_levels <- sort(unique(model_data$group))
 cat("Timepoint × Environment groups:", length(group_levels), "\n")
 print(group_levels)
 
-# Update BAND_NAMES to only the bands that were found
 BAND_NAMES <- found_band_names
-
 cat("\nRows with complete band data:", nrow(model_data), "\n")
 
-# ── Scale bands to [0, 1] per band using global min/max ───────────────────
+# ── Save unscaled copy for per-fold scaling inside CV functions ────────────
+model_data_raw <- model_data
+
+# ── Global scaling of model_data (used for full-data models & plots) ───────
 band_scale <- map(BAND_NAMES, function(b) {
   list(min = min(model_data[[b]], na.rm = TRUE),
        max = max(model_data[[b]], na.rm = TRUE))
@@ -258,7 +281,6 @@ for (b in BAND_NAMES) {
   model_data[[b]] <- (model_data[[b]] - rng$min) / (rng$max - rng$min + 1e-8)
 }
 
-# ── Scale trait columns (z-score, stored for back-transform) ───────────────
 trait_scale <- map(trait_cols, function(t) {
   vals <- model_data[[t]]
   list(mean = mean(vals, na.rm = TRUE), sd = sd(vals, na.rm = TRUE))
@@ -279,6 +301,9 @@ corrplot(cor_bands, method = "color", type = "upper",
          addCoef.col = "black", number.cex = 0.8,
          title = "Band–Band Correlations", mar = c(0,0,2,0))
 ```
+
+
+
 
 # DNN Architecture
 
@@ -340,24 +365,20 @@ cat("  Predictor: VI(1) → 8 → 1 (trait)\n")
 
 # Training
 
-**Leave-One-Group-Out (LOGO) cross-validation** is used, where each fold holds
-out one of the five Timepoint × Environment groups and trains on the remaining
-four:
+Two CV scenarios are run in parallel:
 
-| Fold | Train | Validate |
-|------|-------|----------|
-| 1 | KET21_TP4, MCG23_TP5, MCG25_TP12, SNY22_TP6 | HELF24_TP7 |
-| 2 | HELF24_TP7, MCG23_TP5, MCG25_TP12, SNY22_TP6 | KET21_TP4 |
-| 3 | HELF24_TP7, KET21_TP4, MCG25_TP12, SNY22_TP6 | MCG23_TP5 |
-| 4 | HELF24_TP7, KET21_TP4, MCG23_TP5, SNY22_TP6 | MCG25_TP12 |
-| 5 | HELF24_TP7, KET21_TP4, MCG23_TP5, MCG25_TP12 | SNY22_TP6 |
+- **LOEO**: holds out one environment at a time, trains on the other four.
+- **Within-env 5-fold CV**: within each environment, GIDs are assigned to 5 folds;
+  the model trains on 4 folds and predicts the 5th.
 
-Each fold is repeated `n_reps` times with different training seeds to account
-for stochastic initialisation. After CV, a final model is trained on all five
-groups to extract the **Synthetic VI formula**.
+In both, the band scaler (0–1 min–max) and trait scaler (z-score) are fit on
+training data only and applied to the test fold — `model_data_raw` (unscaled) is
+passed to the CV functions so scaling is done internally.
+
+After CV, a final model trained on all data is used to extract the **Synthetic VI formula**.
 
 ```{r training-functions}
-# ── Helper: build band + label tensors ────────────────────────────────────
+# ── Helper: build band + label tensors from a pre-scaled data frame ────────
 make_tensors <- function(df, trait) {
   df_sub <- df[!is.na(df[[trait]]), ]
   list(
@@ -365,6 +386,21 @@ make_tensors <- function(df, trait) {
                          dtype = torch_float()),
     y     = torch_tensor(df_sub[[trait]], dtype = torch_float())$unsqueeze(2)
   )
+}
+
+# ── Scale df using stats from train_df; return scaled df + back-transform params
+scale_from_train <- function(df, train_df, trait) {
+  band_sc  <- map(BAND_NAMES, function(b)
+    list(mn = min(train_df[[b]], na.rm = TRUE),
+         mx = max(train_df[[b]], na.rm = TRUE))) %>% set_names(BAND_NAMES)
+  trait_mn <- mean(train_df[[trait]], na.rm = TRUE)
+  trait_sd <- sd(train_df[[trait]],   na.rm = TRUE)
+  for (b in BAND_NAMES) {
+    sc <- band_sc[[b]]
+    df[[b]] <- (df[[b]] - sc$mn) / (sc$mx - sc$mn + 1e-8)
+  }
+  df[[trait]] <- (df[[trait]] - trait_mn) / (trait_sd + 1e-8)
+  list(df = df, trait_mn = trait_mn, trait_sd = trait_sd)
 }
 
 # ── Core training loop ─────────────────────────────────────────────────────
@@ -400,155 +436,280 @@ train_model <- function(train_df, trait,
   model
 }
 
-# ── LOGO cross-validation for one trait ───────────────────────────────────
-# Trains on 4 groups, validates on the held-out 5th; repeated n_reps times.
-logo_cv <- function(data, trait, n_reps = 5,
+# ── LOEO: Leave-One-Environment-Out CV ────────────────────────────────────
+# Takes raw (unscaled) data. Scaler fit on training environments only.
+loeo_cv <- function(data_raw, trait, n_reps = 3,
                     epochs = 300, lr = 3e-3, batch_size = 64) {
-  map_dfr(group_levels, function(held_out) {
-    train_df <- data %>% filter(group != held_out, !is.na(.data[[trait]]))
-    test_df  <- data %>% filter(group == held_out, !is.na(.data[[trait]]))
+  envs <- sort(unique(as.character(data_raw$Env)))
+  map_dfr(envs, function(held_env) {
+    train_raw <- data_raw %>% filter(Env != held_env, !is.na(.data[[trait]]))
+    test_raw  <- data_raw %>% filter(Env == held_env,  !is.na(.data[[trait]]))
+    if (nrow(train_raw) < 10 || nrow(test_raw) < 2) return(NULL)
 
-    env_val <- as.character(test_df$Env[1])
-    tp_val  <- test_df$Timepoint[1]
-
-    if (nrow(train_df) < 10 || nrow(test_df) < 2)
-      return(tibble(held_out = held_out, Env = env_val, Timepoint = tp_val,
-                    rep = NA_integer_, n_test = nrow(test_df),
-                    r = NA_real_, rmse = NA_real_))
+    sc_out   <- scale_from_train(train_raw, train_raw, trait)
+    train_sc <- sc_out$df
+    trait_mn <- sc_out$trait_mn
+    trait_sd <- sc_out$trait_sd
+    test_sc  <- scale_from_train(test_raw, train_raw, trait)$df
 
     map_dfr(seq_len(n_reps), function(rep_i) {
       model <- tryCatch(
-        train_model(train_df, trait,
-                    epochs = epochs, lr = lr, batch_size = batch_size,
-                    seed = rep_i * 100L),
-        error = function(e) { message(held_out, " rep", rep_i, ": ", e$message); NULL }
+        train_model(train_sc, trait, epochs = epochs, lr = lr,
+                    batch_size = batch_size, seed = rep_i * 100L),
+        error = function(e) { message(held_env, " rep", rep_i, ": ", e$message); NULL }
       )
-      if (is.null(model))
-        return(tibble(held_out = held_out, Env = env_val, Timepoint = tp_val,
-                      rep = rep_i, n_test = nrow(test_df),
-                      r = NA_real_, rmse = NA_real_))
-
-      te_ten <- make_tensors(test_df, trait)
+      if (is.null(model)) return(NULL)
+      te_ten <- make_tensors(test_sc, trait)
       with_no_grad({
         pred_z <- model(te_ten$bands)$squeeze()$to(device = "cpu")
       })
-      pred_z <- as.numeric(pred_z)
-      obs_z  <- as.numeric(te_ten$y$squeeze())
+      pred <- as.numeric(pred_z) * trait_sd + trait_mn
+      obs  <- as.numeric(te_ten$y$squeeze()) * trait_sd + trait_mn
+      tibble(held_env = held_env, rep = rep_i, n_test = length(obs),
+             r    = cor(pred, obs, use = "complete.obs"),
+             rmse = sqrt(mean((pred - obs)^2, na.rm = TRUE)))
+    })
+  })
+}
 
-      sc   <- trait_scale[[trait]]
-      pred <- pred_z * sc$sd + sc$mean
-      obs  <- obs_z  * sc$sd + sc$mean
+# ── Within-environment 5-fold CV (split by GID) ───────────────────────────
+# Takes raw (unscaled) data. GIDs assigned to folds; scaler fit on train GIDs.
+within_env_cv <- function(data_raw, trait, n_folds = 5, n_reps = 3,
+                          epochs = 300, lr = 3e-3, batch_size = 64) {
+  envs <- sort(unique(as.character(data_raw$Env)))
+  map_dfr(envs, function(env_i) {
+    env_df <- data_raw %>% filter(Env == env_i, !is.na(.data[[trait]]))
+    gids   <- unique(env_df$GID)
+    if (length(gids) < n_folds) {
+      message("Env ", env_i, ": ", length(gids), " GIDs < n_folds — skipping")
+      return(NULL)
+    }
+    map_dfr(seq_len(n_reps), function(rep_i) {
+      set.seed(rep_i * 77L)
+      shuffled <- sample(gids)
+      fold_id  <- rep(seq_len(n_folds), length.out = length(shuffled))
+      gid_fold <- tibble(GID = shuffled, fold = fold_id)
 
-      tibble(
-        held_out  = held_out,
-        Env       = env_val,
-        Timepoint = tp_val,
-        rep       = rep_i,
-        n_test    = length(obs),
-        r         = cor(pred, obs, use = "complete.obs"),
-        rmse      = sqrt(mean((pred - obs)^2, na.rm = TRUE))
-      )
+      map_dfr(seq_len(n_folds), function(f) {
+        test_gids   <- gid_fold$GID[gid_fold$fold == f]
+        train_raw_f <- env_df %>% filter(!GID %in% test_gids)
+        test_raw_f  <- env_df %>% filter( GID %in% test_gids)
+        if (nrow(train_raw_f) < 10 || nrow(test_raw_f) < 2) return(NULL)
+
+        sc_out   <- scale_from_train(train_raw_f, train_raw_f, trait)
+        train_sc <- sc_out$df
+        trait_mn <- sc_out$trait_mn
+        trait_sd <- sc_out$trait_sd
+        test_sc  <- scale_from_train(test_raw_f, train_raw_f, trait)$df
+
+        model <- tryCatch(
+          train_model(train_sc, trait, epochs = epochs, lr = lr,
+                      batch_size = batch_size, seed = rep_i * 100L + f),
+          error = function(e) NULL
+        )
+        if (is.null(model)) return(NULL)
+        te_ten <- make_tensors(test_sc, trait)
+        with_no_grad({
+          pred_z <- model(te_ten$bands)$squeeze()$to(device = "cpu")
+        })
+        pred <- as.numeric(pred_z) * trait_sd + trait_mn
+        obs  <- as.numeric(te_ten$y$squeeze()) * trait_sd + trait_mn
+        tibble(Env = env_i, fold = f, rep = rep_i, n_test = length(obs),
+               r    = cor(pred, obs, use = "complete.obs"),
+               rmse = sqrt(mean((pred - obs)^2, na.rm = TRUE)))
+      })
     })
   })
 }
 ```
 
 ```{r run-training, cache=TRUE}
-# ── Select traits with enough observations across all groups ───────────────
+# ── Select traits with enough observations ────────────────────────────────
 min_obs <- 30
 usable_traits <- trait_cols[
-  sapply(trait_cols, function(t) sum(!is.na(model_data[[t]]))) >= min_obs
+  sapply(trait_cols, function(t) sum(!is.na(model_data_raw[[t]]))) >= min_obs
 ]
 cat("Traits with >=", min_obs, "observations:", length(usable_traits), "\n")
 print(usable_traits)
 
-################################
-usable_traits <- usable_traits[3]   # user selection – expand as needed
+usable_traits <- usable_traits[1]   # user selection – expand as needed
 
-# ── Run LOGO CV ────────────────────────────────────────────────────────────
-all_cv <- map_dfr(usable_traits, function(trait) {
-  cat("LOGO CV – trait:", trait, "\n")
-  res       <- logo_cv(model_data, trait, n_reps = 5,
+# ── LOEO CV (raw data → per-fold scaling inside loeo_cv) ─────────────────
+cat("\nRunning LOEO CV...\n")
+cv_loeo <- map_dfr(usable_traits, function(trait) {
+  cat("  trait:", trait, "\n")
+  res       <- loeo_cv(model_data_raw, trait, n_reps = 3,
                        epochs = 300, lr = 3e-3, batch_size = 64)
   res$trait <- trait
   res
 })
+cat("LOEO CV done. Rows:", nrow(cv_loeo), "\n")
 
-cat("\nLOGO CV complete. Rows:", nrow(all_cv), "\n")
+# ── Within-environment 5-fold CV (raw data → per-fold scaling inside) ────
+cat("\nRunning within-environment 5-fold CV...\n")
+cv_wenv <- map_dfr(usable_traits, function(trait) {
+  cat("  trait:", trait, "\n")
+  res       <- within_env_cv(model_data_raw, trait, n_folds = 5, n_reps = 3,
+                              epochs = 300, lr = 3e-3, batch_size = 64)
+  res$trait <- trait
+  res
+})
+cat("Within-env CV done. Rows:", nrow(cv_wenv), "\n")
 ```
 
-# Results: Prediction Accuracy
+# Results: Cross-Validation Accuracy
 
-```{r cv-accuracy-table}
-# Average over reps for each held-out fold, then summarise across folds
-cv_fold <- all_cv %>%
+## Leave-One-Environment-Out (LOEO)
+
+```{r loeo-summary-table}
+loeo_fold <- cv_loeo %>%
   filter(!is.na(r)) %>%
-  group_by(trait, held_out, Env, Timepoint) %>%
-  summarise(r    = mean(r,    na.rm = TRUE),
-            rmse = mean(rmse, na.rm = TRUE),
+  group_by(trait, held_env) %>%
+  summarise(r      = mean(r,      na.rm = TRUE),
+            rmse   = mean(rmse,   na.rm = TRUE),
+            n_test = first(n_test),
             .groups = "drop")
 
-cv_summary <- cv_fold %>%
+loeo_summary <- loeo_fold %>%
   group_by(trait) %>%
-  summarise(
-    mean_r    = mean(r,    na.rm = TRUE),
-    sd_r      = sd(r,     na.rm = TRUE),
-    mean_rmse = mean(rmse, na.rm = TRUE),
-    n_folds   = n(),
-    .groups   = "drop"
-  ) %>%
+  summarise(mean_r    = mean(r,    na.rm = TRUE),
+            sd_r      = sd(r,     na.rm = TRUE),
+            mean_rmse = mean(rmse, na.rm = TRUE),
+            n_folds   = n(),
+            .groups   = "drop") %>%
   arrange(desc(mean_r))
 
-cv_summary %>%
+loeo_summary %>%
   kable(digits = 3,
         col.names = c("Trait","Mean r","SD r","Mean RMSE","Folds"),
-        caption = "LOGO CV: Synthetic VI prediction accuracy (mean over 5 held-out environments, 5 training repetitions each)") %>%
+        caption   = "LOEO CV: DNN Synthetic VI accuracy (mean over 5 held-out environments, 3 training reps each)") %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE) %>%
   column_spec(2, bold = TRUE,
-              color = ifelse(cv_summary$mean_r > 0.5, "green", "black"))
+              color = ifelse(loeo_summary$mean_r > 0.5, "green", "black"))
 
-cat("\nPer-fold results:\n")
-cv_fold %>%
-  arrange(trait, held_out) %>%
+cat("\nPer-environment LOEO results:\n")
+loeo_fold %>%
+  arrange(trait, held_env) %>%
   kable(digits = 3,
-        col.names = c("Trait","Held-out group","Env","Timepoint","Mean r","Mean RMSE"),
-        caption = "LOGO CV per held-out environment") %>%
+        col.names = c("Trait","Held-out env","Mean r","Mean RMSE","N test"),
+        caption   = "LOEO CV per held-out environment") %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE)
 ```
 
-```{r cv-accuracy-plot, fig.height=5, fig.cap="LOGO CV: dots = individual training repetitions, bar = mean r"}
-all_cv %>%
+```{r loeo-accuracy-plot, fig.height=5, fig.cap="LOEO CV: dots = training repetitions, crossbar = mean r"}
+cv_loeo %>%
   filter(!is.na(r)) %>%
-  ggplot(aes(x = r, y = reorder(held_out, r, mean, na.rm = TRUE),
-             colour = Env)) +
+  ggplot(aes(x = r, y = reorder(held_env, r, mean, na.rm = TRUE),
+             colour = held_env)) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
   geom_jitter(height = 0.12, size = 2.5, alpha = 0.7) +
   stat_summary(fun = mean, geom = "crossbar", width = 0.45,
                colour = "black", linewidth = 0.7) +
   facet_wrap(~trait, ncol = 2) +
   scale_colour_brewer(palette = "Set2") +
-  labs(x = "Pearson r (LOGO CV)", y = "Held-out group",
-       title  = "Synthetic VI – LOGO CV Accuracy",
+  labs(x = "Pearson r (LOEO)", y = "Held-out environment",
+       title  = "DNN Synthetic VI – LOEO Accuracy",
        colour = "Environment") +
   theme_bw(base_size = 13) +
   theme(legend.position = "bottom")
 ```
 
-```{r cv-rep-variability, fig.height=4, fig.cap="r stability across 5 training repetitions per held-out fold"}
-all_cv %>%
+## Within-Environment 5-Fold CV (by GID)
+
+```{r wenv-summary-table}
+wenv_fold_summ <- cv_wenv %>%
   filter(!is.na(r)) %>%
-  ggplot(aes(x = factor(rep), y = r,
-             group = held_out, colour = held_out)) +
-  geom_line(alpha = 0.8, linewidth = 0.8) +
-  geom_point(size = 2.5) +
+  group_by(trait, Env, fold) %>%
+  summarise(r    = mean(r,    na.rm = TRUE),
+            rmse = mean(rmse, na.rm = TRUE),
+            .groups = "drop")
+
+wenv_env_summary <- wenv_fold_summ %>%
+  group_by(trait, Env) %>%
+  summarise(mean_r    = mean(r,    na.rm = TRUE),
+            sd_r      = sd(r,     na.rm = TRUE),
+            mean_rmse = mean(rmse, na.rm = TRUE),
+            n_folds   = n(),
+            .groups   = "drop")
+
+wenv_summary <- wenv_env_summary %>%
+  group_by(trait) %>%
+  summarise(mean_r    = mean(mean_r,    na.rm = TRUE),
+            sd_r      = mean(sd_r,      na.rm = TRUE),
+            mean_rmse = mean(mean_rmse, na.rm = TRUE),
+            .groups   = "drop")
+
+wenv_summary %>%
+  kable(digits = 3,
+        col.names = c("Trait","Mean r","Mean within-env SD r","Mean RMSE"),
+        caption   = "Within-environment 5-fold CV (by GID): mean Pearson r across all environments and folds") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  column_spec(2, bold = TRUE,
+              color = ifelse(wenv_summary$mean_r > 0.5, "green", "black"))
+
+cat("\nPer-environment within-env CV results:\n")
+wenv_env_summary %>%
+  arrange(trait, Env) %>%
+  kable(digits = 3,
+        col.names = c("Trait","Environment","Mean r","SD r","Mean RMSE","N folds"),
+        caption   = "Within-environment 5-fold CV: per-environment summary") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE)
+```
+
+```{r wenv-accuracy-plot, fig.height=5, fig.cap="Within-env CV: dots = individual folds × reps, crossbar = mean r per environment"}
+cv_wenv %>%
+  filter(!is.na(r)) %>%
+  ggplot(aes(x = r, y = reorder(Env, r, mean, na.rm = TRUE),
+             colour = Env)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_jitter(height = 0.12, size = 2, alpha = 0.6) +
+  stat_summary(fun = mean, geom = "crossbar", width = 0.45,
+               colour = "black", linewidth = 0.7) +
   facet_wrap(~trait, ncol = 2) +
   scale_colour_brewer(palette = "Set2") +
-  labs(x = "Training repetition (seed)", y = "Pearson r",
-       colour = "Held-out group",
-       title  = "Stability of LOGO r across training seeds") +
-  theme_bw(base_size = 12) +
+  labs(x = "Pearson r (within-env 5-fold CV by GID)", y = "Environment",
+       title  = "DNN Synthetic VI – Within-Environment CV Accuracy",
+       colour = "Environment") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## CV Scenario Comparison
+
+```{r cv-scenario-comparison}
+cv_scenario_tbl <- bind_rows(
+  loeo_summary  %>% select(trait, mean_r, sd_r, mean_rmse) %>% mutate(CV = "LOEO"),
+  wenv_summary  %>% select(trait, mean_r, sd_r, mean_rmse) %>% mutate(CV = "Within-env 5-fold")
+)
+
+cv_scenario_tbl %>%
+  arrange(trait, CV) %>%
+  kable(digits = 3,
+        col.names = c("Trait","Mean r","SD r","Mean RMSE","CV scenario"),
+        caption   = "DNN Synthetic VI: LOEO vs. within-environment CV") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE)
+```
+
+```{r cv-scenario-plot, fig.height=4, fig.cap="LOEO vs. within-environment CV: mean Pearson r (error bar = SD across folds/envs)"}
+cv_scenario_tbl %>%
+  ggplot(aes(x = mean_r,
+             y = reorder(trait, mean_r, max, na.rm = TRUE),
+             colour = CV, shape = CV)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_errorbarh(aes(xmin = mean_r - sd_r, xmax = mean_r + sd_r),
+                 height = 0.2, alpha = 0.6) +
+  geom_point(size = 4) +
+  scale_colour_manual(values = c(LOEO = "#e34a33",
+                                 `Within-env 5-fold` = "#2c7bb6")) +
+  labs(x = "Mean Pearson r", y = NULL,
+       title  = "LOEO vs. within-environment CV accuracy",
+       colour = "CV scenario", shape = "CV scenario") +
+  theme_bw(base_size = 13) +
   theme(legend.position = "bottom")
 ```
 
@@ -787,7 +948,7 @@ if (length(vi_cols) > 0) {
     ungroup() %>%
     rename(best_vi = vi, std_r = mean_r)
 
-  comparison <- cv_summary %>%
+  comparison <- loeo_summary %>%
     select(trait, syn_r = mean_r) %>%
     left_join(best_std_vi, by = "trait") %>%
     mutate(improvement = syn_r - std_r)
@@ -795,8 +956,8 @@ if (length(vi_cols) > 0) {
   comparison %>%
     arrange(desc(improvement)) %>%
     kable(digits = 3,
-          col.names = c("Trait","Synthetic VI r","Best std VI","Std VI r","Δr"),
-          caption = "Synthetic VI vs. best standard VI (LOGO CV mean Pearson r)") %>%
+          col.names = c("Trait","DNN Synthetic VI r","Best std VI","Std VI r","Δr"),
+          caption = "DNN Synthetic VI vs. best standard VI (LOEO mean Pearson r)") %>%
     kable_styling(bootstrap_options = c("striped","hover","condensed"),
                   full_width = FALSE) %>%
     column_spec(5,
@@ -820,8 +981,8 @@ if (length(vi_cols) > 0 && exists("comparison")) {
     geom_line(aes(group = trait), colour = "grey60", linewidth = 0.5) +
     scale_colour_manual(values = c("Synthetic VI (DNN)"    = "#e34a33",
                                    "Best standard VI (linear)" = "#3182bd")) +
-    labs(x = "Mean LOGO CV r", y = NULL,
-         title  = "Prediction accuracy: Synthetic VI (DNN) vs. Standard VIs",
+    labs(x = "Mean LOEO r", y = NULL,
+         title  = "Prediction accuracy: DNN Synthetic VI vs. Standard VIs (LOEO)",
          colour = NULL, shape = NULL) +
     theme_bw(base_size = 13) +
     theme(legend.position = "bottom")
@@ -864,7 +1025,11 @@ if (length(vi_cols) > 0 && nrow(synvi_rows) > 0) {
 # Summary
 
 ```{r summary-table}
-final_summary <- cv_summary %>%
+final_summary <- loeo_summary %>%
+  left_join(
+    wenv_summary %>% select(trait, wenv_r = mean_r),
+    by = "trait"
+  ) %>%
   left_join(
     sensitivity_list %>%
       group_by(trait) %>%
@@ -876,9 +1041,9 @@ final_summary <- cv_summary %>%
 
 final_summary %>%
   kable(digits = 3,
-        col.names = c("Trait","Mean r (LOEO)","SD r","Mean RMSE",
-                      "Valid folds","Top band"),
-        caption = "Summary: DNN Synthetic VI within-group CV performance and dominant spectral band") %>%
+        col.names = c("Trait","LOEO r","SD r","LOEO RMSE","N folds",
+                      "Within-env r","Top band"),
+        caption = "Summary: DNN Synthetic VI – LOEO and within-environment CV accuracy with dominant spectral band") %>%
   kable_styling(bootstrap_options = c("striped","hover","condensed"),
                 full_width = FALSE)
 ```
