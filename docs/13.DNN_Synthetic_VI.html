@@ -367,7 +367,7 @@ div.tocify {
 <h1 class="title toc-ignore">DNN-Derived Synthetic Vegetation Index for
 Phenotype Prediction</h1>
 <h4 class="author">workflowr</h4>
-<h4 class="date">2026-05-14 16:08:42.837451</h4>
+<h4 class="date">2026-05-14 23:54:37.668394</h4>
 
 </div>
 
@@ -556,15 +556,15 @@ data/WMB_pheno.Rdata
 <div class="panel panel-default">
 <div class="panel-heading">
 <p class="panel-title">
-<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree06f136519a2731fed867ad5c27a0e2d3ed0f629btargetblank06f1365a">
+<a data-toggle="collapse" data-parent="#workflowr-checks" href="#strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree1edea2618cb3add0121a058da053dd46040e92e8targetblank1edea26a">
 <span class="glyphicon glyphicon-ok text-success"
 aria-hidden="true"></span> <strong>Repository version:</strong>
-<a href="https://github.com/sss9010/NY_WMBCL/tree/06f136519a2731fed867ad5c27a0e2d3ed0f629b" target="_blank">06f1365</a>
+<a href="https://github.com/sss9010/NY_WMBCL/tree/1edea2618cb3add0121a058da053dd46040e92e8" target="_blank">1edea26</a>
 </a>
 </p>
 </div>
 <div
-id="strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree06f136519a2731fed867ad5c27a0e2d3ed0f629btargetblank06f1365a"
+id="strongRepositoryversionstrongahrefhttpsgithubcomsss9010NYWMBCLtree1edea2618cb3add0121a058da053dd46040e92e8targetblank1edea26a"
 class="panel-collapse collapse">
 <div class="panel-body">
 <p>
@@ -574,7 +574,7 @@ reproducibility.
 </p>
 <p>
 The results in this page were generated with repository version
-<a href="https://github.com/sss9010/NY_WMBCL/tree/06f136519a2731fed867ad5c27a0e2d3ed0f629b" target="_blank">06f1365</a>.
+<a href="https://github.com/sss9010/NY_WMBCL/tree/1edea2618cb3add0121a058da053dd46040e92e8" target="_blank">1edea26</a>.
 See the <em>Past versions</em> tab to see a history of the changes made
 to the R Markdown and HTML files.
 </p>
@@ -615,16 +615,6 @@ Untracked files:
 Unstaged changes:
     Modified:   .claude/settings.local.json
     Modified:   analysis/13.DNN_Synthetic_VI.Rmd
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/__packages
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/extract-synthetic-vi_629ae2ed9c0da75f335064d08cdaf0b7.RData
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/extract-synthetic-vi_629ae2ed9c0da75f335064d08cdaf0b7.rdb
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/extract-synthetic-vi_629ae2ed9c0da75f335064d08cdaf0b7.rdx
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/run-training_055feacaf9b78a4574a90ccf76b15b01.RData
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/run-training_055feacaf9b78a4574a90ccf76b15b01.rdb
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/run-training_055feacaf9b78a4574a90ccf76b15b01.rdx
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/sensitivity-analysis_9ba2b6c6d7866d605472b299d427fa28.RData
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/sensitivity-analysis_9ba2b6c6d7866d605472b299d427fa28.rdb
-    Deleted:    analysis/13.DNN_Synthetic_VI_cache/html/sensitivity-analysis_9ba2b6c6d7866d605472b299d427fa28.rdx
 
 </code></pre>
 <p>
@@ -669,6 +659,41 @@ Message
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>
+html
+</td>
+<td>
+<a href="https://rawcdn.githack.com/sss9010/NY_WMBCL/1edea2618cb3add0121a058da053dd46040e92e8/docs/13.DNN_Synthetic_VI.html" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+<td>
+Rebuild HTML with NDVI baseline comparison section
+</td>
+</tr>
+<tr>
+<td>
+Rmd
+</td>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/f4746c184840c2b0968bb3fbefa4f5f83a7d226d/analysis/13.DNN_Synthetic_VI.Rmd" target="_blank">f4746c1</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+<td>
+Add NDVI linear regression baseline comparison to DNN Synthetic VI
+analysis
+</td>
+</tr>
 <tr>
 <td>
 Rmd
@@ -1261,7 +1286,7 @@ cat(&quot;Timepoint × Environment groups:&quot;, length(group_levels), &quot;\n
 cat(&quot;\nRows with complete band data:&quot;, nrow(model_data), &quot;\n&quot;)</code></pre>
 <pre><code>
 Rows with complete band data: 1939 </code></pre>
-<pre class="r"><code># ── Compute NDVI from raw band values (before global scaling) ─────────────
+<pre class="r"><code># ── Compute NDVI from raw band values (before any standardisation) ────────
 if (all(c(&quot;red&quot;, &quot;nir&quot;) %in% names(model_data))) {
   model_data &lt;- model_data %&gt;%
     mutate(NDVI_raw = (nir - red) / (nir + red + 1e-8))
@@ -1272,7 +1297,37 @@ if (all(c(&quot;red&quot;, &quot;nir&quot;) %in% names(model_data))) {
   warning(&quot;Cannot compute NDVI_raw: &#39;red&#39; or &#39;nir&#39; not found in band columns.&quot;)
 }</code></pre>
 <pre><code>NDVI_raw computed: min = 0.314  mean = 0.619  max = 0.923 </code></pre>
-<pre class="r"><code># ── Save unscaled copy for per-fold scaling inside CV functions ────────────
+<pre class="r"><code># ── Per-environment spectral standardisation ──────────────────────────────
+# Each band is z-scored within its environment, removing environment-specific
+# spectral baseline offsets (sensor calibration, soil background, canopy
+# structure differences between trials). Applied after NDVI_raw so NDVI
+# uses original reflectances. Both model_data_raw (CV) and model_data
+# (full-data models) receive these standardised bands.
+model_data &lt;- model_data %&gt;%
+  group_by(Env) %&gt;%
+  mutate(across(all_of(BAND_NAMES),
+                ~ (. - mean(., na.rm = TRUE)) / (sd(., na.rm = TRUE) + 1e-8))) %&gt;%
+  ungroup()
+
+cat(&quot;\nPer-environment band standardisation applied.\n&quot;)</code></pre>
+<pre><code>
+Per-environment band standardisation applied.</code></pre>
+<pre class="r"><code>cat(&quot;Post-standardisation band means per environment (should be ~0):\n&quot;)</code></pre>
+<pre><code>Post-standardisation band means per environment (should be ~0):</code></pre>
+<pre class="r"><code>model_data %&gt;%
+  group_by(Env) %&gt;%
+  summarise(across(all_of(BAND_NAMES), ~ round(mean(., na.rm = TRUE), 3)),
+            .groups = &quot;drop&quot;) %&gt;%
+  print()</code></pre>
+<pre><code># A tibble: 5 × 6
+  Env     blue green   red red_edge   nir
+  &lt;fct&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
+1 HELF24     0     0     0        0     0
+2 KET21      0     0     0        0     0
+3 MCG23      0     0     0        0     0
+4 MCG25      0     0     0        0     0
+5 SNY22      0     0     0        0     0</code></pre>
+<pre class="r"><code># ── Save env-standardised, unscaled copy for per-fold scaling in CV ────────
 model_data_raw &lt;- model_data
 
 # ── Global scaling of model_data (used for full-data models &amp; plots) ───────
@@ -1755,13 +1810,13 @@ Folds
 yield_kgha
 </td>
 <td style="text-align:right;font-weight: bold;color: black !important;">
-0.389
+0.382
 </td>
 <td style="text-align:right;">
-0.277
+0.398
 </td>
 <td style="text-align:right;">
-1656.251
+1053.634
 </td>
 <td style="text-align:right;">
 5
@@ -1811,10 +1866,10 @@ yield_kgha
 HELF24
 </td>
 <td style="text-align:right;">
-0.151
+0.256
 </td>
 <td style="text-align:right;">
-1963.479
+1125.200
 </td>
 <td style="text-align:right;">
 312
@@ -1828,10 +1883,10 @@ yield_kgha
 KET21
 </td>
 <td style="text-align:right;">
-0.550
+0.592
 </td>
 <td style="text-align:right;">
-758.965
+757.777
 </td>
 <td style="text-align:right;">
 466
@@ -1845,10 +1900,10 @@ yield_kgha
 MCG23
 </td>
 <td style="text-align:right;">
-0.092
+0.898
 </td>
 <td style="text-align:right;">
-1468.771
+1032.064
 </td>
 <td style="text-align:right;">
 504
@@ -1862,10 +1917,10 @@ yield_kgha
 MCG25
 </td>
 <td style="text-align:right;">
-0.759
+-0.171
 </td>
 <td style="text-align:right;">
-3022.937
+1274.562
 </td>
 <td style="text-align:right;">
 232
@@ -1879,10 +1934,10 @@ yield_kgha
 SNY22
 </td>
 <td style="text-align:right;">
-0.392
+0.335
 </td>
 <td style="text-align:right;">
-1067.103
+1078.567
 </td>
 <td style="text-align:right;">
 424
@@ -1933,6 +1988,17 @@ Date
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/loeo-accuracy-plot-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
 <tr>
 <td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/loeo-accuracy-plot-1.png" target="_blank">06f1365</a>
@@ -2016,7 +2082,7 @@ yield_kgha
 0.044
 </td>
 <td style="text-align:right;">
-635.229
+635.256
 </td>
 </tr>
 </tbody>
@@ -2072,7 +2138,7 @@ HELF24
 0.095
 </td>
 <td style="text-align:right;">
-699.705
+699.629
 </td>
 <td style="text-align:right;">
 5
@@ -2092,7 +2158,7 @@ KET21
 0.044
 </td>
 <td style="text-align:right;">
-683.384
+683.360
 </td>
 <td style="text-align:right;">
 5
@@ -2112,7 +2178,7 @@ MCG23
 0.011
 </td>
 <td style="text-align:right;">
-570.751
+570.827
 </td>
 <td style="text-align:right;">
 5
@@ -2152,7 +2218,7 @@ SNY22
 0.029
 </td>
 <td style="text-align:right;">
-699.656
+699.813
 </td>
 <td style="text-align:right;">
 5
@@ -2204,6 +2270,17 @@ Date
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/wenv-accuracy-plot-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
 <tr>
 <td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/wenv-accuracy-plot-1.png" target="_blank">06f1365</a>
@@ -2264,13 +2341,13 @@ CV scenario
 yield_kgha
 </td>
 <td style="text-align:right;">
-0.389
+0.382
 </td>
 <td style="text-align:right;">
-0.277
+0.398
 </td>
 <td style="text-align:right;">
-1656.251
+1053.634
 </td>
 <td style="text-align:left;">
 LOEO
@@ -2287,7 +2364,7 @@ yield_kgha
 0.044
 </td>
 <td style="text-align:right;">
-635.229
+635.256
 </td>
 <td style="text-align:left;">
 Within-env 5-fold
@@ -2549,7 +2626,7 @@ NDVI r (within-env)
 yield_kgha
 </td>
 <td style="text-align:right;">
-0.389
+0.382
 </td>
 <td style="text-align:right;">
 0.591
@@ -2561,7 +2638,7 @@ yield_kgha
 0.587
 </td>
 <td style="text-align:right;">
--0.202
+-0.209
 </td>
 <td style="text-align:right;font-weight: bold;color: forestgreen !important;">
 0.14
@@ -2604,6 +2681,43 @@ yield_kgha
 <p class="caption">
 DNN Synthetic VI vs. NDVI linear regression — Pearson r by CV scenario
 </p>
+</div>
+<p>
+<button type="button" class="btn btn-default btn-xs btn-workflowr btn-workflowr-fig" data-toggle="collapse" data-target="#fig-ndvi-dnn-comparison-plot-1">
+Past versions of ndvi-dnn-comparison-plot-1.png
+</button>
+</p>
+<div id="fig-ndvi-dnn-comparison-plot-1" class="collapse">
+<div class="table-responsive">
+<table class="table table-condensed table-hover">
+<thead>
+<tr>
+<th>
+Version
+</th>
+<th>
+Author
+</th>
+<th>
+Date
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/ndvi-dnn-comparison-plot-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
+</tbody>
+</table>
+</div>
 </div>
 </div>
 </div>
@@ -2692,6 +2806,17 @@ Date
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/synthetic-vi-distributions-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
 <tr>
 <td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/synthetic-vi-distributions-1.png" target="_blank">06f1365</a>
@@ -2795,6 +2920,17 @@ Date
 <tbody>
 <tr>
 <td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/sensitivity-heatmap-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
+<tr>
+<td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/sensitivity-heatmap-1.png" target="_blank">06f1365</a>
 </td>
 <td>
@@ -2850,6 +2986,17 @@ Date
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/sensitivity-barplot-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
 <tr>
 <td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/sensitivity-barplot-1.png" target="_blank">06f1365</a>
@@ -2988,22 +3135,22 @@ bias
 h1[1]
 </td>
 <td style="text-align:right;">
-0.0043
+0.1029
 </td>
 <td style="text-align:right;">
-0.0328
+0.1312
 </td>
 <td style="text-align:right;">
--0.5739
+-0.9815
 </td>
 <td style="text-align:right;">
-0.9780
+0.6051
 </td>
 <td style="text-align:right;">
--0.3205
+0.3365
 </td>
 <td style="text-align:right;">
--0.1842
+-0.4047
 </td>
 </tr>
 <tr>
@@ -3011,22 +3158,22 @@ h1[1]
 h1[2]
 </td>
 <td style="text-align:right;">
-0.1060
+0.0193
 </td>
 <td style="text-align:right;">
--0.0682
+-0.2159
 </td>
 <td style="text-align:right;">
-0.7356
+0.9023
 </td>
 <td style="text-align:right;">
-0.2040
+0.0407
 </td>
 <td style="text-align:right;">
--0.3628
+-0.1765
 </td>
 <td style="text-align:right;">
--0.1379
+0.0635
 </td>
 </tr>
 <tr>
@@ -3034,22 +3181,22 @@ h1[2]
 h1[3]
 </td>
 <td style="text-align:right;">
-0.4787
+0.4705
 </td>
 <td style="text-align:right;">
-0.1870
+0.1784
 </td>
 <td style="text-align:right;">
--0.0779
+0.3034
 </td>
 <td style="text-align:right;">
--0.0677
+-0.9013
 </td>
 <td style="text-align:right;">
-0.4924
+0.3236
 </td>
 <td style="text-align:right;">
--0.4732
+-0.1700
 </td>
 </tr>
 <tr>
@@ -3080,22 +3227,22 @@ h1[4]
 h1[5]
 </td>
 <td style="text-align:right;">
--0.2434
+-0.2545
 </td>
 <td style="text-align:right;">
--0.0966
+-0.1109
 </td>
 <td style="text-align:right;">
--0.3213
+-0.5589
 </td>
 <td style="text-align:right;">
-0.8453
+0.3646
 </td>
 <td style="text-align:right;">
--0.4071
+-0.6554
 </td>
 <td style="text-align:right;">
-0.0769
+0.4357
 </td>
 </tr>
 <tr>
@@ -3103,22 +3250,22 @@ h1[5]
 h1[6]
 </td>
 <td style="text-align:right;">
--0.0027
+0.0000
 </td>
 <td style="text-align:right;">
--0.0027
+0.0000
 </td>
 <td style="text-align:right;">
--0.0007
+0.0000
 </td>
 <td style="text-align:right;">
--0.0020
+0.0000
 </td>
 <td style="text-align:right;">
--0.0059
+0.0000
 </td>
 <td style="text-align:right;">
--0.0134
+0.0000
 </td>
 </tr>
 <tr>
@@ -3126,22 +3273,22 @@ h1[6]
 h1[7]
 </td>
 <td style="text-align:right;">
-0.5559
+0.2265
 </td>
 <td style="text-align:right;">
--0.1623
+-0.5088
 </td>
 <td style="text-align:right;">
-0.4299
+0.8860
 </td>
 <td style="text-align:right;">
--0.3112
+-0.2280
 </td>
 <td style="text-align:right;">
--0.8438
+-0.1735
 </td>
 <td style="text-align:right;">
-0.0338
+0.1982
 </td>
 </tr>
 <tr>
@@ -3149,22 +3296,22 @@ h1[7]
 h1[8]
 </td>
 <td style="text-align:right;">
-0.5054
+0.5003
 </td>
 <td style="text-align:right;">
-0.3043
+0.2992
 </td>
 <td style="text-align:right;">
-0.4215
+0.3591
 </td>
 <td style="text-align:right;">
--0.3442
+-0.6553
 </td>
 <td style="text-align:right;">
-0.1099
+0.0500
 </td>
 <td style="text-align:right;">
--0.4500
+-0.2325
 </td>
 </tr>
 <tr>
@@ -3172,22 +3319,22 @@ h1[8]
 h1[9]
 </td>
 <td style="text-align:right;">
--0.1666
+-0.3522
 </td>
 <td style="text-align:right;">
--0.3959
+-0.5803
 </td>
 <td style="text-align:right;">
-0.4356
+0.7580
 </td>
 <td style="text-align:right;">
-0.6481
+0.4955
 </td>
 <td style="text-align:right;">
--0.4584
+0.1810
 </td>
 <td style="text-align:right;">
--0.1295
+-0.1458
 </td>
 </tr>
 <tr>
@@ -3195,22 +3342,22 @@ h1[9]
 h1[10]
 </td>
 <td style="text-align:right;">
--0.0821
+-0.4316
 </td>
 <td style="text-align:right;">
-0.3506
+0.0031
 </td>
 <td style="text-align:right;">
-0.1085
+0.7069
 </td>
 <td style="text-align:right;">
--0.2079
+0.0027
 </td>
 <td style="text-align:right;">
--0.8911
+-0.3797
 </td>
 <td style="text-align:right;">
-0.1520
+0.2245
 </td>
 </tr>
 <tr>
@@ -3218,22 +3365,22 @@ h1[10]
 h1[11]
 </td>
 <td style="text-align:right;">
--0.2558
+-0.3205
 </td>
 <td style="text-align:right;">
--0.0702
+-0.0925
 </td>
 <td style="text-align:right;">
--0.3507
+-1.1359
 </td>
 <td style="text-align:right;">
-0.8498
+0.0884
 </td>
 <td style="text-align:right;">
--0.4094
+0.2077
 </td>
 <td style="text-align:right;">
-0.0836
+0.3622
 </td>
 </tr>
 <tr>
@@ -3241,22 +3388,22 @@ h1[11]
 h1[12]
 </td>
 <td style="text-align:right;">
-0.2454
+0.3680
 </td>
 <td style="text-align:right;">
-0.2055
+0.3272
 </td>
 <td style="text-align:right;">
-0.4778
+-0.5449
 </td>
 <td style="text-align:right;">
-0.1222
+0.2143
 </td>
 <td style="text-align:right;">
--0.4642
+-0.6042
 </td>
 <td style="text-align:right;">
--0.1881
+-0.0447
 </td>
 </tr>
 <tr>
@@ -3264,22 +3411,22 @@ h1[12]
 h1[13]
 </td>
 <td style="text-align:right;">
-0.1346
+0.1702
 </td>
 <td style="text-align:right;">
--0.1825
+-0.1404
 </td>
 <td style="text-align:right;">
--0.9399
+0.6569
 </td>
 <td style="text-align:right;">
-0.0804
+-0.7555
 </td>
 <td style="text-align:right;">
-0.6863
+0.4059
 </td>
 <td style="text-align:right;">
--0.1872
+-0.0916
 </td>
 </tr>
 <tr>
@@ -3287,22 +3434,22 @@ h1[13]
 h1[14]
 </td>
 <td style="text-align:right;">
-0.0893
+0.1780
 </td>
 <td style="text-align:right;">
-0.5409
+0.6278
 </td>
 <td style="text-align:right;">
--0.3206
+0.1274
 </td>
 <td style="text-align:right;">
--0.1045
+-0.6624
 </td>
 <td style="text-align:right;">
--1.0344
+-0.3680
 </td>
 <td style="text-align:right;">
-0.2294
+0.0248
 </td>
 </tr>
 <tr>
@@ -3333,22 +3480,22 @@ h1[15]
 h1[16]
 </td>
 <td style="text-align:right;">
--0.4579
+0.0000
 </td>
 <td style="text-align:right;">
--0.4524
+0.0000
 </td>
 <td style="text-align:right;">
-0.6096
+0.0000
 </td>
 <td style="text-align:right;">
-0.3827
+0.0000
 </td>
 <td style="text-align:right;">
--0.0377
+0.0000
 </td>
 <td style="text-align:right;">
--0.0347
+0.0000
 </td>
 </tr>
 </tbody>
@@ -3433,7 +3580,7 @@ h2[1]
 0.0000
 </td>
 <td style="text-align:right;">
-0.0000
+0
 </td>
 <td style="text-align:right;">
 0.0000
@@ -3463,7 +3610,7 @@ h2[1]
 0
 </td>
 <td style="text-align:right;">
-0.0000
+0e+00
 </td>
 <td style="text-align:right;">
 0.0000
@@ -3474,55 +3621,55 @@ h2[1]
 h2[2]
 </td>
 <td style="text-align:right;">
-1.3993
+0.4254
 </td>
 <td style="text-align:right;">
--0.1706
+-1.0275
 </td>
 <td style="text-align:right;">
--0.3200
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
-0.2514
-</td>
-<td style="text-align:right;">
-0.0012
-</td>
-<td style="text-align:right;">
--0.4190
-</td>
-<td style="text-align:right;">
--0.3516
-</td>
-<td style="text-align:right;">
--0.3939
-</td>
-<td style="text-align:right;">
--0.3862
-</td>
-<td style="text-align:right;">
-0.2428
-</td>
-<td style="text-align:right;">
--0.2721
-</td>
-<td style="text-align:right;">
--0.9858
-</td>
-<td style="text-align:right;">
--0.6722
+-0.3740
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.4634
+0.5912
 </td>
 <td style="text-align:right;">
-0.0936
+0
+</td>
+<td style="text-align:right;">
+-1.0964
+</td>
+<td style="text-align:right;">
+-0.3326
+</td>
+<td style="text-align:right;">
+0.1263
+</td>
+<td style="text-align:right;">
+-0.8826
+</td>
+<td style="text-align:right;">
+0.6912
+</td>
+<td style="text-align:right;">
+-0.2392
+</td>
+<td style="text-align:right;">
+-0.6539
+</td>
+<td style="text-align:right;">
+-0.1963
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+0e+00
+</td>
+<td style="text-align:right;">
+0.0219
 </td>
 </tr>
 <tr>
@@ -3530,55 +3677,55 @@ h2[2]
 h2[3]
 </td>
 <td style="text-align:right;">
-1.0577
+0.9691
 </td>
 <td style="text-align:right;">
--0.0209
+-0.3014
 </td>
 <td style="text-align:right;">
--0.0188
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
-0.4865
-</td>
-<td style="text-align:right;">
-0.0001
-</td>
-<td style="text-align:right;">
--0.8018
-</td>
-<td style="text-align:right;">
--0.0504
-</td>
-<td style="text-align:right;">
-0.2580
-</td>
-<td style="text-align:right;">
--0.2685
-</td>
-<td style="text-align:right;">
-0.8531
-</td>
-<td style="text-align:right;">
--0.0156
-</td>
-<td style="text-align:right;">
-0.0708
-</td>
-<td style="text-align:right;">
--0.7378
+0.7272
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.1964
+0.1789
 </td>
 <td style="text-align:right;">
-0.0281
+0
+</td>
+<td style="text-align:right;">
+-0.3275
+</td>
+<td style="text-align:right;">
+-1.1193
+</td>
+<td style="text-align:right;">
+0.2954
+</td>
+<td style="text-align:right;">
+-0.7003
+</td>
+<td style="text-align:right;">
+-0.0139
+</td>
+<td style="text-align:right;">
+-0.5235
+</td>
+<td style="text-align:right;">
+0.5402
+</td>
+<td style="text-align:right;">
+-0.4782
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+0e+00
+</td>
+<td style="text-align:right;">
+0.1160
 </td>
 </tr>
 <tr>
@@ -3586,55 +3733,55 @@ h2[3]
 h2[4]
 </td>
 <td style="text-align:right;">
-1.8452
+0.8225
 </td>
 <td style="text-align:right;">
--1.1732
+0.0141
 </td>
 <td style="text-align:right;">
--0.3746
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
-0.3430
-</td>
-<td style="text-align:right;">
-0.0017
-</td>
-<td style="text-align:right;">
--0.0010
-</td>
-<td style="text-align:right;">
--0.8550
-</td>
-<td style="text-align:right;">
--0.2982
-</td>
-<td style="text-align:right;">
-0.2320
-</td>
-<td style="text-align:right;">
-0.4813
-</td>
-<td style="text-align:right;">
--0.8617
-</td>
-<td style="text-align:right;">
--0.7893
-</td>
-<td style="text-align:right;">
--0.4133
+-0.6198
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.7557
+0.7124
 </td>
 <td style="text-align:right;">
-0.0736
+0
+</td>
+<td style="text-align:right;">
+-0.1420
+</td>
+<td style="text-align:right;">
+-0.1604
+</td>
+<td style="text-align:right;">
+0.1904
+</td>
+<td style="text-align:right;">
+-0.2459
+</td>
+<td style="text-align:right;">
+-0.0157
+</td>
+<td style="text-align:right;">
+-0.3866
+</td>
+<td style="text-align:right;">
+-1.4002
+</td>
+<td style="text-align:right;">
+-0.4245
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+-3e-04
+</td>
+<td style="text-align:right;">
+0.1207
 </td>
 </tr>
 <tr>
@@ -3642,55 +3789,55 @@ h2[4]
 h2[5]
 </td>
 <td style="text-align:right;">
--0.7999
+-0.1871
 </td>
 <td style="text-align:right;">
--0.0556
+-0.0022
 </td>
 <td style="text-align:right;">
-0.2936
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
--1.2218
-</td>
-<td style="text-align:right;">
-0.0000
-</td>
-<td style="text-align:right;">
-0.1631
-</td>
-<td style="text-align:right;">
-0.1277
-</td>
-<td style="text-align:right;">
--0.4240
-</td>
-<td style="text-align:right;">
-0.2349
-</td>
-<td style="text-align:right;">
--1.4121
-</td>
-<td style="text-align:right;">
--0.0283
-</td>
-<td style="text-align:right;">
--0.2220
-</td>
-<td style="text-align:right;">
-0.2011
+0.4455
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.0899
+-0.5121
 </td>
 <td style="text-align:right;">
-0.0609
+0
+</td>
+<td style="text-align:right;">
+0.0376
+</td>
+<td style="text-align:right;">
+0.2707
+</td>
+<td style="text-align:right;">
+-0.6078
+</td>
+<td style="text-align:right;">
+0.0290
+</td>
+<td style="text-align:right;">
+-0.3758
+</td>
+<td style="text-align:right;">
+0.7420
+</td>
+<td style="text-align:right;">
+0.6941
+</td>
+<td style="text-align:right;">
+0.1081
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+0e+00
+</td>
+<td style="text-align:right;">
+0.0167
 </td>
 </tr>
 <tr>
@@ -3698,55 +3845,55 @@ h2[5]
 h2[6]
 </td>
 <td style="text-align:right;">
--0.6338
+-0.6718
 </td>
 <td style="text-align:right;">
-0.0506
+0.0287
 </td>
 <td style="text-align:right;">
-0.4353
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
--0.8389
-</td>
-<td style="text-align:right;">
--0.0001
-</td>
-<td style="text-align:right;">
-0.1007
-</td>
-<td style="text-align:right;">
--0.1307
-</td>
-<td style="text-align:right;">
--0.6278
-</td>
-<td style="text-align:right;">
-0.3171
-</td>
-<td style="text-align:right;">
--0.9540
-</td>
-<td style="text-align:right;">
-0.1513
-</td>
-<td style="text-align:right;">
--0.1883
-</td>
-<td style="text-align:right;">
-0.0774
+0.5772
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.5234
+-1.0519
 </td>
 <td style="text-align:right;">
-0.0111
+0
+</td>
+<td style="text-align:right;">
+-0.0037
+</td>
+<td style="text-align:right;">
+0.0382
+</td>
+<td style="text-align:right;">
+-0.4830
+</td>
+<td style="text-align:right;">
+0.0950
+</td>
+<td style="text-align:right;">
+-1.4578
+</td>
+<td style="text-align:right;">
+0.4509
+</td>
+<td style="text-align:right;">
+0.2217
+</td>
+<td style="text-align:right;">
+0.1711
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+0e+00
+</td>
+<td style="text-align:right;">
+-0.0064
 </td>
 </tr>
 <tr>
@@ -3754,55 +3901,55 @@ h2[6]
 h2[7]
 </td>
 <td style="text-align:right;">
--0.6904
+-0.2470
 </td>
 <td style="text-align:right;">
-0.0163
+-0.0085
 </td>
 <td style="text-align:right;">
-0.5193
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
--1.2947
-</td>
-<td style="text-align:right;">
-0.0001
-</td>
-<td style="text-align:right;">
-0.1758
-</td>
-<td style="text-align:right;">
--0.0949
-</td>
-<td style="text-align:right;">
--0.3096
-</td>
-<td style="text-align:right;">
-0.3061
-</td>
-<td style="text-align:right;">
--1.4027
-</td>
-<td style="text-align:right;">
-0.0210
-</td>
-<td style="text-align:right;">
--0.2181
-</td>
-<td style="text-align:right;">
-0.1527
+0.3262
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
-0.1396
+-0.2460
 </td>
 <td style="text-align:right;">
-0.0095
+0
+</td>
+<td style="text-align:right;">
+-0.0113
+</td>
+<td style="text-align:right;">
+0.1530
+</td>
+<td style="text-align:right;">
+-1.2424
+</td>
+<td style="text-align:right;">
+-0.0011
+</td>
+<td style="text-align:right;">
+-0.1185
+</td>
+<td style="text-align:right;">
+0.7659
+</td>
+<td style="text-align:right;">
+0.6565
+</td>
+<td style="text-align:right;">
+0.0547
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+0e+00
+</td>
+<td style="text-align:right;">
+0.0222
 </td>
 </tr>
 <tr>
@@ -3810,61 +3957,60 @@ h2[7]
 h2[8]
 </td>
 <td style="text-align:right;">
--0.4662
+-0.3997
 </td>
 <td style="text-align:right;">
-0.1054
+0.0138
 </td>
 <td style="text-align:right;">
--0.0164
-</td>
-<td style="text-align:right;">
-0
-</td>
-<td style="text-align:right;">
--0.6552
-</td>
-<td style="text-align:right;">
-0.0003
-</td>
-<td style="text-align:right;">
--0.0107
-</td>
-<td style="text-align:right;">
-0.4419
-</td>
-<td style="text-align:right;">
--0.7085
-</td>
-<td style="text-align:right;">
-0.0358
-</td>
-<td style="text-align:right;">
--0.8020
-</td>
-<td style="text-align:right;">
-0.0495
-</td>
-<td style="text-align:right;">
--0.2168
-</td>
-<td style="text-align:right;">
-0.2070
+0.5439
 </td>
 <td style="text-align:right;">
 0
 </td>
 <td style="text-align:right;">
--0.7045
+-1.3261
 </td>
 <td style="text-align:right;">
-0.0004
+0
+</td>
+<td style="text-align:right;">
+0.0156
+</td>
+<td style="text-align:right;">
+0.3391
+</td>
+<td style="text-align:right;">
+-1.2905
+</td>
+<td style="text-align:right;">
+-0.0328
+</td>
+<td style="text-align:right;">
+-1.1189
+</td>
+<td style="text-align:right;">
+0.1763
+</td>
+<td style="text-align:right;">
+-0.1104
+</td>
+<td style="text-align:right;">
+0.2057
+</td>
+<td style="text-align:right;">
+0
+</td>
+<td style="text-align:right;">
+5e-04
+</td>
+<td style="text-align:right;">
+0.0207
 </td>
 </tr>
 </tbody>
 </table>
-<p><strong>Layer 3 weights</strong> w3 (1 × 8) and bias b3 = -0.0314
-:</p>
+<p><strong>Layer 3 weights</strong> w3 (1 × 8) and bias b3 = 0.02 :</p>
 <table class="table table-striped table-condensed" style="font-size: 10px; width: auto !important; margin-left: auto; margin-right: auto;">
 <thead>
 <tr>
@@ -3890,7 +4036,7 @@ h2[1]
 h2[2]
 </td>
 <td style="text-align:right;">
-1.3291
+1.6307
 </td>
 </tr>
 <tr>
@@ -3898,7 +4044,7 @@ h2[2]
 h2[3]
 </td>
 <td style="text-align:right;">
-0.7221
+0.8223
 </td>
 </tr>
 <tr>
@@ -3906,7 +4052,7 @@ h2[3]
 h2[4]
 </td>
 <td style="text-align:right;">
-1.8931
+0.6818
 </td>
 </tr>
 <tr>
@@ -3914,7 +4060,7 @@ h2[4]
 h2[5]
 </td>
 <td style="text-align:right;">
--0.6517
+-0.5030
 </td>
 </tr>
 <tr>
@@ -3922,7 +4068,7 @@ h2[5]
 h2[6]
 </td>
 <td style="text-align:right;">
--0.7751
+-0.8403
 </td>
 </tr>
 <tr>
@@ -3930,7 +4076,7 @@ h2[6]
 h2[7]
 </td>
 <td style="text-align:right;">
--0.7816
+-0.6242
 </td>
 </tr>
 <tr>
@@ -3938,7 +4084,7 @@ h2[7]
 h2[8]
 </td>
 <td style="text-align:right;">
--0.6988
+-1.0477
 </td>
 </tr>
 </tbody>
@@ -3965,10 +4111,10 @@ dVI/dBand (at mean)
 red
 </td>
 <td style="text-align:right;">
--0.4934
+-0.2888
 </td>
 <td style="text-align:right;">
-0.4934
+0.2888
 </td>
 </tr>
 <tr>
@@ -3976,10 +4122,10 @@ red
 nir
 </td>
 <td style="text-align:right;">
-0.3629
+0.1113
 </td>
 <td style="text-align:right;">
-0.3629
+0.1113
 </td>
 </tr>
 <tr>
@@ -3987,21 +4133,10 @@ nir
 blue
 </td>
 <td style="text-align:right;">
--0.1634
+0.0699
 </td>
 <td style="text-align:right;">
-0.1634
-</td>
-</tr>
-<tr>
-<td style="text-align:left;">
-red_edge
-</td>
-<td style="text-align:right;">
--0.1315
-</td>
-<td style="text-align:right;">
-0.1315
+0.0699
 </td>
 </tr>
 <tr>
@@ -4009,10 +4144,21 @@ red_edge
 green
 </td>
 <td style="text-align:right;">
--0.0849
+0.0662
 </td>
 <td style="text-align:right;">
-0.0849
+0.0662
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+red_edge
+</td>
+<td style="text-align:right;">
+0.0263
+</td>
+<td style="text-align:right;">
+0.0263
 </td>
 </tr>
 </tbody>
@@ -4020,7 +4166,7 @@ green
 <p><strong>Approximate linear formula</strong> (linearised around band
 means):</p>
 <p><span class="math display">\[\text{SynVI}_{yield_kgha} \approx 0.0000
--0.4934 × red +0.3629 × nir -0.1634 × blue + \text{const}\]</span></p>
+-0.2888 × red +0.1113 × nir +0.0699 × blue + \text{const}\]</span></p>
 </div>
 </div>
 <div id="comparison-synthetic-vi-vs.-standard-vis"
@@ -4105,7 +4251,7 @@ Std VI r
 yield_kgha
 </td>
 <td style="text-align:right;">
-0.389
+0.382
 </td>
 <td style="text-align:left;">
 EVI
@@ -4114,7 +4260,7 @@ EVI
 0.628
 </td>
 <td style="text-align:right;font-weight: bold;color: red !important;">
--0.239
+-0.246
 </td>
 </tr>
 </tbody>
@@ -4245,6 +4391,17 @@ Date
 <tbody>
 <tr>
 <td>
+<a href="https://github.com/sss9010/NY_WMBCL/blob/1edea2618cb3add0121a058da053dd46040e92e8/docs/figure/13.DNN_Synthetic_VI.Rmd/synvi-stdvi-corr-1.png" target="_blank">1edea26</a>
+</td>
+<td>
+sss9010
+</td>
+<td>
+2026-05-14
+</td>
+</tr>
+<tr>
+<td>
 <a href="https://github.com/sss9010/NY_WMBCL/blob/06f136519a2731fed867ad5c27a0e2d3ed0f629b/docs/figure/13.DNN_Synthetic_VI.Rmd/synvi-stdvi-corr-1.png" target="_blank">06f1365</a>
 </td>
 <td>
@@ -4318,13 +4475,13 @@ Top band
 yield_kgha
 </td>
 <td style="text-align:right;">
-0.389
+0.382
 </td>
 <td style="text-align:right;">
-0.277
+0.398
 </td>
 <td style="text-align:right;">
-1656.251
+1053.634
 </td>
 <td style="text-align:right;">
 5
@@ -4333,7 +4490,7 @@ yield_kgha
 0.728
 </td>
 <td style="text-align:left;">
-red_edge
+red
 </td>
 </tr>
 </tbody>
@@ -4373,13 +4530,13 @@ loaded via a namespace (and not attached):
 [25] later_1.4.4        pillar_1.11.1      jquerylib_0.1.4    whisker_0.4.1     
 [29] cachem_1.1.0       tidyselect_1.2.1   digest_0.6.37      stringi_1.8.4     
 [33] labeling_0.4.3     rprojroot_2.1.1    fastmap_1.2.0      grid_4.4.2        
-[37] cli_3.6.3          magrittr_2.0.3     withr_3.0.2        scales_1.4.0      
-[41] promises_1.5.0     bit64_4.6.0-1      timechange_0.4.0   rmarkdown_2.31    
-[45] httr_1.4.7         bit_4.6.0          otel_0.2.0         hms_1.1.4         
-[49] evaluate_1.0.5     viridisLite_0.4.3  rlang_1.2.0        Rcpp_1.1.0        
-[53] glue_1.8.0         xml2_1.5.1         coro_1.1.0         svglite_2.2.2     
-[57] rstudioapi_0.18.0  jsonlite_2.0.0     R6_2.6.1           systemfonts_1.3.2 
-[61] fs_1.6.6          </code></pre>
+[37] cli_3.6.3          magrittr_2.0.3     utf8_1.2.6         withr_3.0.2       
+[41] scales_1.4.0       promises_1.5.0     bit64_4.6.0-1      timechange_0.4.0  
+[45] rmarkdown_2.31     httr_1.4.7         bit_4.6.0          otel_0.2.0        
+[49] hms_1.1.4          evaluate_1.0.5     viridisLite_0.4.3  rlang_1.2.0       
+[53] Rcpp_1.1.0         glue_1.8.0         xml2_1.5.1         coro_1.1.0        
+[57] svglite_2.2.2      rstudioapi_0.18.0  jsonlite_2.0.0     R6_2.6.1          
+[61] systemfonts_1.3.2  fs_1.6.6          </code></pre>
 <br>
 <p>
 <button type="button" class="btn btn-default btn-workflowr btn-workflowr-sessioninfo" data-toggle="collapse" data-target="#workflowr-sessioninfo" style="display: block;">
@@ -4423,13 +4580,13 @@ loaded via a namespace (and not attached):
 [25] later_1.4.4        pillar_1.11.1      jquerylib_0.1.4    whisker_0.4.1     
 [29] cachem_1.1.0       tidyselect_1.2.1   digest_0.6.37      stringi_1.8.4     
 [33] labeling_0.4.3     rprojroot_2.1.1    fastmap_1.2.0      grid_4.4.2        
-[37] cli_3.6.3          magrittr_2.0.3     withr_3.0.2        scales_1.4.0      
-[41] promises_1.5.0     bit64_4.6.0-1      timechange_0.4.0   rmarkdown_2.31    
-[45] httr_1.4.7         bit_4.6.0          otel_0.2.0         hms_1.1.4         
-[49] evaluate_1.0.5     viridisLite_0.4.3  rlang_1.2.0        Rcpp_1.1.0        
-[53] glue_1.8.0         xml2_1.5.1         coro_1.1.0         svglite_2.2.2     
-[57] rstudioapi_0.18.0  jsonlite_2.0.0     R6_2.6.1           systemfonts_1.3.2 
-[61] fs_1.6.6          </code></pre>
+[37] cli_3.6.3          magrittr_2.0.3     utf8_1.2.6         withr_3.0.2       
+[41] scales_1.4.0       promises_1.5.0     bit64_4.6.0-1      timechange_0.4.0  
+[45] rmarkdown_2.31     httr_1.4.7         bit_4.6.0          otel_0.2.0        
+[49] hms_1.1.4          evaluate_1.0.5     viridisLite_0.4.3  rlang_1.2.0       
+[53] Rcpp_1.1.0         glue_1.8.0         xml2_1.5.1         coro_1.1.0        
+[57] svglite_2.2.2      rstudioapi_0.18.0  jsonlite_2.0.0     R6_2.6.1          
+[61] systemfonts_1.3.2  fs_1.6.6          </code></pre>
 </div>
 </div>
 </div>

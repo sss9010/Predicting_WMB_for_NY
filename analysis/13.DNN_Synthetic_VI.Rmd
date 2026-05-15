@@ -267,7 +267,7 @@ print(group_levels)
 BAND_NAMES <- found_band_names
 cat("\nRows with complete band data:", nrow(model_data), "\n")
 
-# ── Compute NDVI from raw band values (before global scaling) ─────────────
+# ── Compute NDVI from raw band values (before any standardisation) ────────
 if (all(c("red", "nir") %in% names(model_data))) {
   model_data <- model_data %>%
     mutate(NDVI_raw = (nir - red) / (nir + red + 1e-8))
@@ -278,7 +278,27 @@ if (all(c("red", "nir") %in% names(model_data))) {
   warning("Cannot compute NDVI_raw: 'red' or 'nir' not found in band columns.")
 }
 
-# ── Save unscaled copy for per-fold scaling inside CV functions ────────────
+# ── Per-environment spectral standardisation ──────────────────────────────
+# Each band is z-scored within its environment, removing environment-specific
+# spectral baseline offsets (sensor calibration, soil background, canopy
+# structure differences between trials). Applied after NDVI_raw so NDVI
+# uses original reflectances. Both model_data_raw (CV) and model_data
+# (full-data models) receive these standardised bands.
+model_data <- model_data %>%
+  group_by(Env) %>%
+  mutate(across(all_of(BAND_NAMES),
+                ~ (. - mean(., na.rm = TRUE)) / (sd(., na.rm = TRUE) + 1e-8))) %>%
+  ungroup()
+
+cat("\nPer-environment band standardisation applied.\n")
+cat("Post-standardisation band means per environment (should be ~0):\n")
+model_data %>%
+  group_by(Env) %>%
+  summarise(across(all_of(BAND_NAMES), ~ round(mean(., na.rm = TRUE), 3)),
+            .groups = "drop") %>%
+  print()
+
+# ── Save env-standardised, unscaled copy for per-fold scaling in CV ────────
 model_data_raw <- model_data
 
 # ── Global scaling of model_data (used for full-data models & plots) ───────
