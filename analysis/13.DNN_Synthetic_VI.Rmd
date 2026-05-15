@@ -347,8 +347,11 @@ The network has two components trained **within each Timepoint × Environment gr
 2. **Prediction Head** — maps the scalar Synthetic VI through one hidden layer
    to the trait prediction.
 
-Because modelling is within-group, between-year and between-trial offsets are
-irrelevant; no environment embedding is needed.
+The prediction head receives the Synthetic VI concatenated with a learned
+**environment embedding** so that the VI→trait mapping can shift per trial,
+while the encoder (VI formula) remains shared across environments.
+For unseen environments in LOEO, the mean embedding of the training environments
+is used as a proxy.
 
 ```{r dnn-definition}
 # ══════════════════════════════════════════════════════════════════════════
@@ -374,15 +377,23 @@ BandEncoder <- nn_module(
 # ══════════════════════════════════════════════════════════════════════════
 SyntheticVIModel <- nn_module(
   classname = "SyntheticVIModel",
-  initialize = function(n_bands = 5, pred_h = 8) {
+  initialize = function(n_bands = 5, n_envs = 5, d_embed = 4L, pred_h = 8L) {
     self$encoder  <- BandEncoder(n_bands)
-    self$pred_fc1 <- nn_linear(1, pred_h)
-    self$pred_fc2 <- nn_linear(pred_h, 1)
+    self$env_emb  <- nn_embedding(n_envs, d_embed)     # one vector per environment
+    self$pred_fc1 <- nn_linear(1L + d_embed, pred_h)   # [SynVI | env_embed] → hidden
+    self$pred_fc2 <- nn_linear(pred_h, 1L)
     self$drop     <- nn_dropout(0.1)
   },
-  forward = function(bands) {
-    vi <- self$encoder(bands)                            # (N, 1)
-    vi %>% self$pred_fc1() %>% nnf_relu() %>% self$drop() %>% self$pred_fc2()
+  forward = function(bands, env_idx = NULL, env_vec = NULL) {
+    vi <- self$encoder(bands)                           # (N, 1)
+    ev <- if (!is.null(env_idx)) {
+      self$env_emb(env_idx)                             # (N, d_embed) — known env
+    } else {
+      env_vec$expand(c(vi$size(1), -1L))                # broadcast mean embed for unseen env
+    }
+    torch_cat(list(vi, ev), dim = 2) %>%
+      self$pred_fc1() %>% nnf_relu() %>% self$drop() %>%
+      self$pred_fc2()
   },
   get_synthetic_vi = function(bands) {
     self$encoder(bands)
@@ -390,8 +401,9 @@ SyntheticVIModel <- nn_module(
 )
 
 cat("Model architecture defined.\n")
-cat("  Encoder:   n_bands → 16 → 8 → 1 (Synthetic VI)\n")
-cat("  Predictor: VI(1) → 8 → 1 (trait)\n")
+cat("  Encoder:       n_bands → 16 → 8 → 1 (Synthetic VI)\n")
+cat("  Env embedding: n_envs × d_embed = 4\n")
+cat("  Predictor:     (1 + 4) → 8 → 1 (trait)\n")
 ```
 
 # Training
@@ -435,17 +447,26 @@ scale_from_train <- function(df, train_df, trait) {
 }
 
 # ── Core training loop ─────────────────────────────────────────────────────
-train_model <- function(train_df, trait,
+train_model <- function(train_df, trait, env_levels,
                         epochs = 300, lr = 3e-3, batch_size = 64,
                         seed = NULL, verbose = FALSE) {
   if (!is.null(seed)) torch_manual_seed(seed)
+  df_sub  <- train_df[!is.na(train_df[[trait]]), ]
   tensors <- make_tensors(train_df, trait)
   n       <- tensors$bands$size(1)
   if (n < 10) return(NULL)
 
-  model <- SyntheticVIModel(n_bands = length(BAND_NAMES), pred_h = 8)
-  opt   <- optim_adam(model$parameters, lr = lr, weight_decay = 1e-4)
-  sched <- lr_step(opt, step_size = 100, gamma = 0.5)
+  # Environment indices (1-based, as required by torch nn_embedding in R)
+  env_idx <- torch_tensor(
+    match(as.character(df_sub$Env), env_levels),
+    dtype = torch_long()
+  )
+
+  n_envs <- length(env_levels)
+  model  <- SyntheticVIModel(n_bands = length(BAND_NAMES),
+                              n_envs = n_envs, d_embed = 4L, pred_h = 8L)
+  opt    <- optim_adam(model$parameters, lr = lr, weight_decay = 1e-4)
+  sched  <- lr_step(opt, step_size = 100, gamma = 0.5)
 
   model$train()
   for (ep in seq_len(epochs)) {
@@ -453,7 +474,8 @@ train_model <- function(train_df, trait,
     for (i in seq(1, n, by = batch_size)) {
       bi <- idx[i:min(i + batch_size - 1, n)]
       opt$zero_grad()
-      pred <- model(tensors$bands[bi, , drop = FALSE])
+      pred <- model(tensors$bands[bi, , drop = FALSE],
+                    env_idx = env_idx[bi])
       loss <- nnf_mse_loss(pred, tensors$y[bi, , drop = FALSE])
       loss$backward()
       nn_utils_clip_grad_norm_(model$parameters, 1.0)
@@ -469,7 +491,9 @@ train_model <- function(train_df, trait,
 
 # ── LOEO: Leave-One-Environment-Out CV ────────────────────────────────────
 # Takes raw (unscaled) data. Scaler fit on training environments only.
-loeo_cv <- function(data_raw, trait, n_reps = 3,
+# For the unseen held-out environment, the mean embedding of the 4 training
+# environments is used as a proxy in the prediction head.
+loeo_cv <- function(data_raw, trait, env_levels, n_reps = 3,
                     epochs = 300, lr = 3e-3, batch_size = 64) {
   envs <- sort(unique(as.character(data_raw$Env)))
   map_dfr(envs, function(held_env) {
@@ -483,16 +507,29 @@ loeo_cv <- function(data_raw, trait, n_reps = 3,
     trait_sd <- sc_out$trait_sd
     test_sc  <- scale_from_train(test_raw, train_raw, trait)$df
 
+    # Indices (1-based) of the 4 training environments
+    train_env_idx <- torch_tensor(
+      match(sort(unique(as.character(train_raw$Env))), env_levels),
+      dtype = torch_long()
+    )
+
     map_dfr(seq_len(n_reps), function(rep_i) {
       model <- tryCatch(
-        train_model(train_sc, trait, epochs = epochs, lr = lr,
+        train_model(train_sc, trait, env_levels = env_levels,
+                    epochs = epochs, lr = lr,
                     batch_size = batch_size, seed = rep_i * 100L),
         error = function(e) { message(held_env, " rep", rep_i, ": ", e$message); NULL }
       )
       if (is.null(model)) return(NULL)
+
+      # Mean embedding of training envs → proxy for unseen held-out environment
+      mean_env_vec <- with_no_grad({
+        model$env_emb(train_env_idx)$mean(dim = 1, keepdim = TRUE)
+      })
+
       te_ten <- make_tensors(test_sc, trait)
       with_no_grad({
-        pred_z <- model(te_ten$bands)$squeeze()$to(device = "cpu")
+        pred_z <- model(te_ten$bands, env_vec = mean_env_vec)$squeeze()$to(device = "cpu")
       })
       pred <- as.numeric(pred_z) * trait_sd + trait_mn
       obs  <- as.numeric(te_ten$y$squeeze()) * trait_sd + trait_mn
@@ -505,12 +542,15 @@ loeo_cv <- function(data_raw, trait, n_reps = 3,
 
 # ── Within-environment 5-fold CV (split by GID) ───────────────────────────
 # Takes raw (unscaled) data. GIDs assigned to folds; scaler fit on train GIDs.
-within_env_cv <- function(data_raw, trait, n_folds = 5, n_reps = 3,
+# The correct environment index is known for both train and test, so the
+# learned embedding is used directly (no mean-proxy needed).
+within_env_cv <- function(data_raw, trait, env_levels, n_folds = 5, n_reps = 3,
                           epochs = 300, lr = 3e-3, batch_size = 64) {
   envs <- sort(unique(as.character(data_raw$Env)))
   map_dfr(envs, function(env_i) {
-    env_df <- data_raw %>% filter(Env == env_i, !is.na(.data[[trait]]))
-    gids   <- unique(env_df$GID)
+    env_df    <- data_raw %>% filter(Env == env_i, !is.na(.data[[trait]]))
+    gids      <- unique(env_df$GID)
+    env_i_idx <- match(env_i, env_levels)   # 1-based index for this env (torch R convention)
     if (length(gids) < n_folds) {
       message("Env ", env_i, ": ", length(gids), " GIDs < n_folds — skipping")
       return(NULL)
@@ -534,14 +574,20 @@ within_env_cv <- function(data_raw, trait, n_folds = 5, n_reps = 3,
         test_sc  <- scale_from_train(test_raw_f, train_raw_f, trait)$df
 
         model <- tryCatch(
-          train_model(train_sc, trait, epochs = epochs, lr = lr,
+          train_model(train_sc, trait, env_levels = env_levels,
+                      epochs = epochs, lr = lr,
                       batch_size = batch_size, seed = rep_i * 100L + f),
           error = function(e) NULL
         )
         if (is.null(model)) return(NULL)
-        te_ten <- make_tensors(test_sc, trait)
+        te_ten    <- make_tensors(test_sc, trait)
+        te_env_idx <- torch_tensor(
+          rep(env_i_idx, te_ten$bands$size(1)),
+          dtype = torch_long()
+        )
         with_no_grad({
-          pred_z <- model(te_ten$bands)$squeeze()$to(device = "cpu")
+          pred_z <- model(te_ten$bands,
+                          env_idx = te_env_idx)$squeeze()$to(device = "cpu")
         })
         pred <- as.numeric(pred_z) * trait_sd + trait_mn
         obs  <- as.numeric(te_ten$y$squeeze()) * trait_sd + trait_mn
@@ -613,12 +659,16 @@ print(usable_traits)
 
 usable_traits <- usable_traits[1]   # user selection – expand as needed
 
+# ── Environment levels: consistent ordering used for embedding indices ────
+env_levels <- sort(unique(as.character(model_data_raw$Env)))
+cat("Environment levels (embedding order):", paste(env_levels, collapse = ", "), "\n")
+
 # ── LOEO CV (raw data → per-fold scaling inside loeo_cv) ─────────────────
 cat("\nRunning LOEO CV...\n")
 cv_loeo <- map_dfr(usable_traits, function(trait) {
   cat("  trait:", trait, "\n")
-  res       <- loeo_cv(model_data_raw, trait, n_reps = 3,
-                       epochs = 300, lr = 3e-3, batch_size = 64)
+  res       <- loeo_cv(model_data_raw, trait, env_levels = env_levels,
+                       n_reps = 3, epochs = 300, lr = 3e-3, batch_size = 64)
   res$trait <- trait
   res
 })
@@ -628,7 +678,8 @@ cat("LOEO CV done. Rows:", nrow(cv_loeo), "\n")
 cat("\nRunning within-environment 5-fold CV...\n")
 cv_wenv <- map_dfr(usable_traits, function(trait) {
   cat("  trait:", trait, "\n")
-  res       <- within_env_cv(model_data_raw, trait, n_folds = 5, n_reps = 3,
+  res       <- within_env_cv(model_data_raw, trait, env_levels = env_levels,
+                              n_folds = 5, n_reps = 3,
                               epochs = 300, lr = 3e-3, batch_size = 64)
   res$trait <- trait
   res
@@ -958,8 +1009,8 @@ These models are used to (a) extract the Synthetic VI for every observation and
 full_models <- map(usable_traits, function(trait) {
   cat("Training full model – trait:", trait, "\n")
   tryCatch(
-    train_model(model_data, trait, epochs = 300, lr = 3e-3, batch_size = 64,
-                seed = 42L),
+    train_model(model_data, trait, env_levels = env_levels,
+                epochs = 300, lr = 3e-3, batch_size = 64, seed = 42L),
     error = function(e) { message(e$message); NULL }
   )
 }) %>% set_names(usable_traits)
