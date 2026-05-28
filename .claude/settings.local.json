@@ -45,7 +45,12 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "PowerShell($env:RSTUDIO_PANDOC = \"C:\\\\Program Files\\\\RStudio\\\\resources\\\\app\\\\bin\\\\quarto\\\\bin\\\\tools\"; & \"C:\\\\Program Files\\\\R\\\\R-4.4.2\\\\bin\\\\Rscript.exe\" -e \"workflowr::wflow_build\\('analysis/13.DNN_Synthetic_VI_summary.Rmd', verbose=TRUE\\)\" 2>&1)"
+      "PowerShell($env:RSTUDIO_PANDOC = \"C:\\\\Program Files\\\\RStudio\\\\resources\\\\app\\\\bin\\\\quarto\\\\bin\\\\tools\"; & \"C:\\\\Program Files\\\\R\\\\R-4.4.2\\\\bin\\\\Rscript.exe\" -e \"workflowr::wflow_build\\('analysis/13.DNN_Synthetic_VI_summary.Rmd', verbose=TRUE\\)\" 2>&1)",
+      "Bash(Select-String -Pattern \"agronomic|ensemble|spec_BLUE\")",
+      "Bash(Select-String -Path \"C:\\\\Users\\\\Siim Sepp\\\\Predicting_WMB_for_NY\\\\docs\\\\13.DNN_Synthetic_VI.html\" -Pattern \"self_contained|figure/\" -SimpleMatch)",
+      "Bash(Select-Object -First 5)",
+      "PowerShell(Select-String -Path \"C:\\\\Users\\\\Siim Sepp\\\\Predicting_WMB_for_NY\\\\docs\\\\13.DNN_Synthetic_VI.html\" -Pattern 'src=\"figure/' -SimpleMatch | Select-Object -First 3 | ForEach-Object { $_.Line.Substring\\(0, [Math]::Min\\(120, $_.Line.Length\\)\\) })",
+      "Bash(git restore *)"
     ]
   }
 }
