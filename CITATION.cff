@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use this code or methodology, please cite it as below."
+type: software
+title: "NY Winter Malting Barley — Genomic & Phenomic Prediction Pipeline"
+abstract: >
+  A reproducible R analysis pipeline integrating UAV multispectral drone imagery,
+  Barley 50K SNP genotype data, and multi-year field phenotypes to predict
+  agronomic performance and malt quality traits in the NY Winter Malting Barley
+  breeding programme. Encompasses spatial mixed-model correction, heritability
+  estimation, phenomic prediction (linear, LASSO, RF, mixed-model kernels),
+  genomic prediction (GBLUP), multi-trait and double-kernel models, functional
+  PCA on spectral time-series, and a DNN-derived Synthetic Vegetation Index.
+authors:
+  - family-names: Sepp
+    given-names: Siim
+    email: sss322@cornell.edu
+    affiliation: Cornell University
+  - family-names: Jannink
+    given-names: Jean-Luc
+    affiliation: Cornell University
+  - family-names: Sorrells
+    given-names: Mark E.
+    affiliation: Cornell University
+repository-code: "https://github.com/sss9010/Predicting_WMB_for_NY"
+url: "https://github.com/sss9010/Predicting_WMB_for_NY"
+license: MIT
+version: "1.0.0"
+date-released: "2025-05-27"
+keywords:
+  - plant breeding
+  - barley
+  - genomic prediction
+  - phenomics
+  - remote sensing
+  - UAV
+  - vegetation index
+  - deep learning
+  - mixed models
+  - heritability
+  - quantitative genetics
+  - malt quality

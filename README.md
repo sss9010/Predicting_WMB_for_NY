@@ -1,21 +1,26 @@
 # NY Winter Malting Barley — Genomic & Phenomic Prediction Pipeline
 
-[![workflowr](https://img.shields.io/badge/workflowr-reproducible-brightgreen)](https://workflowr.github.io/workflowr/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Language: R](https://img.shields.io/badge/Language-R-276DC3.svg)](https://www.r-project.org/)
+[![Framework: workflowr](https://img.shields.io/badge/Framework-workflowr-brightgreen)](https://workflowr.github.io/workflowr/)
+[![Deep Learning: torch](https://img.shields.io/badge/Deep%20Learning-torch-EE4C2C.svg)](https://torch.mlverse.org/)
 
 A reproducible R analysis pipeline for predicting **agronomic** and **malt quality** traits in the NY Winter Malting Barley (WMB) breeding program, combining UAV multispectral drone imagery, Barley 50K SNP genotype data, and multi-year field phenotypes across five environments (2021–2025).
 
-TLDR: Malt quality analysis is a considerable cost in barley breeding programs. Can UAVs be used to accelerate genetic gain and predict breeding values and phenotypes within field? Yes, but... Phenomic prediction works better for agronomic traits and within years with more severe winter stress. Genomic prediction benefits from including a correlated traits and varies in effectiveness depending on the trait. Many factors must be weighed before integrating these approaches into breeding programs, but the signal is there. Sometimes more, sometimes less. 
+More info: <https://cals.cornell.edu/field-crops/small-grains/small-grains-breeding-and-genetics>
 
-More info: https://cals.cornell.edu/field-crops/small-grains/small-grains-breeding-and-genetics
+---
+
+> **TLDR:** Malt quality analysis is a considerable cost in barley breeding programs. Can UAVs be used to accelerate genetic gain and predict breeding values and phenotypes within field? Yes, but — phenomic prediction works better for agronomic traits and within years with more severe winter stress. Genomic prediction benefits from including correlated traits and varies in effectiveness depending on the trait. Many factors must be weighed before integrating these approaches into breeding programs, but the signal is there.
+
 ---
 
 ## Overview
 
 This project develops and benchmarks a suite of prediction models for barley breeding selection, using three complementary data layers:
 
-- **Spectral:** NDVI and PSRI from UAV multispectral flights at multiple timepoints per season
-- **Genotype:** Barley 50K SNP array mapped to the Morex V3 assembly
+- **Spectral:** 5-band UAV multispectral imagery (blue, green, red, red-edge, NIR) at multiple timepoints per season
+- **Genotype:** Barley 50K SNP array mapped to the Morex V3 assembly (DH, RIL, and Winter populations)
 - **Phenotype:** Yield, heading date, and 12 malt quality traits (extract, protein, β-glucan, FAN, diastatic power, etc.)
 
 Prediction approaches range from classical mixed models to machine learning and deep learning:
@@ -26,65 +31,100 @@ Prediction approaches range from classical mixed models to machine learning and 
 | Genomic prediction | GBLUP with spatial AR1×AR1 correction |
 | Multi-trait genomic prediction | Bivariate GBLUP using spectral VIs as correlated helper traits |
 | Double-kernel | Combined genomic + phenomic relationship kernels |
+| DNN Synthetic VI | Bottleneck DNN learning optimal band combinations per trait |
+
+---
+
+## Key Result: DNN-Derived Synthetic Vegetation Index
+
+A deep neural network with a **spectral bottleneck** (5 bands → 16 → 8 → **1 Synthetic VI** → trait) learns a data-optimised vegetation index for each target trait — outperforming fixed hand-crafted indices like NDVI under leave-one-environment-out cross-validation.
+
+<p align="center">
+  <img src="assets/figures/synvi_vs_standard_vi.png" width="700"
+       alt="DNN Synthetic VI vs best standard VI — LOEO mean Pearson r"/>
+  <br><em>DNN Synthetic VI vs. best standard VI — LOEO mean Pearson r per trait</em>
+</p>
+
+<p align="center">
+  <img src="assets/figures/loeo_accuracy.png" width="650"
+       alt="LOEO cross-validation accuracy by held-out environment"/>
+  <br><em>Leave-One-Environment-Out accuracy per held-out trial site</em>
+</p>
+
+<p align="center">
+  <img src="assets/figures/band_importance.png" width="600"
+       alt="Gradient-based spectral band importance per trait"/>
+  <br><em>Gradient-based band importance — which spectral channels drive each Synthetic VI</em>
+</p>
+
+🔗 **Standalone DNN repository:** [sss9010/dnn-synthetic-vi](https://github.com/sss9010/dnn-synthetic-vi)  
+📄 **Live report:** [DNN_Synthetic_VI.html](https://sss9010.github.io/dnn-synthetic-vi/DNN_Synthetic_VI.html)
 
 ---
 
 ## Analysis Pipeline
 
-| File | Description |
-|------|-------------|
-| `1. Trait heritability analysis.Rmd` | Estimate h² and H² for VIs, malt quality, and agronomic traits via ASReml |
-| `2. Exploratory_pheno_ analysis.Rmd` | Trait distributions, correlation matrices, heading date and flight timeline visualisation |
+| Script | Description |
+|--------|-------------|
+| `E1. Multi_spec_pre_processing.Rmd` | Import QGIS zonal statistics from UAV flights; compute NDVI/NDRE; QC and merge with plot IDs |
+| `E2. Spectral_data_BLUP_new.Rmd` | Spatial mixed models on spectral/VI data → BLUPs/BLUEs per timepoint |
+| `E3. Trait_spatial_mod_tester.Rmd` | Test 300 spatial correction models for individual traits via 5-fold CV |
+| `1. Data_Pre_Processing.Rmd` | Merge pedigree, genotype (HapMap), and phenotype data |
+| `2. Trait heritability analysis.Rmd` | Estimate h² and H² for VIs, malt quality, and agronomic traits via ASReml |
 | `3. Spectral_data_BLUE.Rmd` | Spatial BLUE models for spectral and agronomic traits; build VI time-series matrix |
 | `4. F_PCA.Rmd` | PCA and FPCA on spectral time-series; extract functional principal components |
 | `5. Phenomic kernel_build.Rmd` | Build phenomic relationship matrices from VI time-series data |
-| `6. PP_ag_mq.Rmd` | Phenomic prediction for agronomic (BLUE) and malt quality (raw) traits |
-| `7. GP_ag_mq.Rmd` | GBLUP cross-validation for agronomic (BLUEs) and malt quality (raw) traits |
+| `6. PP_ag_mq.Rmd` | Phenomic prediction for agronomic and malt quality traits |
+| `7. GP_ag_mq.Rmd` | GBLUP cross-validation for agronomic and malt quality traits |
 | `8. MT_GP.Rmd` | Multi-trait GBLUP using spectral VIs and FPCs as correlated helper traits |
-| `10.DK_GP.Rmd` | Double-kernel GBLUP (genomic G + phenomic P kernels) |
+| `10. DK_GP.Rmd` | Double-kernel GBLUP (genomic G + phenomic P kernels) |
 | `11. Prediction_plots.Rmd` | Visualisation and cross-method comparison of prediction accuracies |
+| `13. DNN_Synthetic_VI.Rmd` | DNN-derived Synthetic VI — training, CV, band sensitivity, formula extraction |
 
 ---
 
-## Rendered Analyses
+## Data
 
-Full rendered HTML outputs are available at the project GitHub Pages site:
-**https://sss9010.github.io/Predicting_WMB_for_NY**
+| Location | Contents |
+|----------|----------|
+| `data/geno/` | 50K SNP array in HapMap, VCF, and PLINK formats (Morex V3); DH, RIL, Winter populations |
+| `data/Flights/` | QGIS zonal statistics CSVs from UAV flights across five environments |
+| `data/ag_BLUE_spatial.*` | Agronomic BLUEs (spatially corrected via AR1×AR1) |
+| `data/spec_BLUE_spatial.*` | Spectral BLUEs across timepoints |
+| `data/mq_BLUP_spatial.*` | Malt quality BLUPs |
+| `data/MT_*_mat.Rdata` | Phenomic relationship matrices (raw & BLUE) |
+| `data/F_PCA_scores.Rdata` | Functional PCA scores |
+| `data/WMB_pheno.Rdata` | Master merged dataset (bands + VIs + traits) |
+
+**Environments:** HELF24, KET21, MCG23, MCG25, SNY22  
+**Populations:** DH (doubled haploids), RIL (recombinant inbred lines), Winter 2019 lines
+
+> Raw genotype files are not redistributed. Processed `.Rdata` intermediates are available on request.
 
 ---
 
 ## Dependencies
-
-Core packages (install from CRAN unless noted):
 
 ```r
 # Mixed models & genomics (asreml requires a VSNi licence — free for academia)
 install.packages(c("asreml", "ASRgenomics", "ASRtriala", "rrBLUP"))
 
 # Machine learning
-install.packages(c("caret", "glmnet", "randomForest"))
+install.packages(c("glmnet", "ranger", "caret"))
 
 # Functional data analysis
 install.packages("fda")
 
+# Deep learning (DNN Synthetic VI)
+install.packages("torch"); torch::install_torch()
+
 # Data wrangling & visualisation
-install.packages(c("tidyverse", "readxl", "writexl", "data.table", "purrr"))
+install.packages(c("tidyverse", "ggplot2", "patchwork", "corrplot",
+                   "readxl", "writexl", "knitr", "kableExtra"))
 
 # Reproducibility
 install.packages("workflowr")
 ```
-
----
-
-## Data
-
-| Directory | Contents |
-|-----------|----------|
-| `data/geno/` | 50K SNP array in HapMap, VCF, and PLINK formats (Morex V3); DH, RIL, Winter populations |
-| `data/pheno/` | Agronomic BLUPs/BLUEs, malt quality data, VI master datasets by year |
-| `data/Flights/` | QGIS zonal statistics CSVs from UAV flights across five environments |
-
-> Raw genotype files are not redistributed in this repository. Processed intermediate `.Rdata` files are available on request.
 
 ---
 
@@ -93,29 +133,27 @@ install.packages("workflowr")
 All analysis is managed via [workflowr](https://workflowr.github.io/workflowr/). From an R console in the project root:
 
 ```r
-# Render a single step
-wflow_build("analysis/1. Data_Pre_Processing.Rmd")
-
-# Render the full pipeline
-wflow_build()
-
-# Publish rendered HTML to docs/ and commit
-wflow_publish("analysis/1. Data_Pre_Processing.Rmd", "message")
-
-# Check project status
-wflow_status()
+wflow_build("analysis/7. GP_ag_mq.Rmd")  # render a single step
+wflow_build()                              # render full pipeline
+wflow_publish("analysis/7. GP_ag_mq.Rmd", "message")  # publish to docs/
+wflow_status()                             # check project status
 ```
 
 ---
 
 ## Citation
 
-If you use this pipeline or results, please cite:
+```
+Sepp, S.S., Jannink, J.L., Sorrells, M.E. (2025). NY Winter Malting Barley —
+Genomic & Phenomic Prediction Pipeline. GitHub.
+https://github.com/sss9010/Predicting_WMB_for_NY
+```
 
-> Sepp, S. (2025). *NY Winter Malting Barley Genomic and Phenomic Prediction Pipeline*. GitHub. https://github.com/sss9010/Predicting_WMB_for_NY
+A machine-readable citation is in [`CITATION.cff`](CITATION.cff).
 
 ---
 
 ## Contact
 
-Siim Sepp · sss@322cornell.edu
+**Siim Sepp** — sss322@cornell.edu  
+NY Winter Malting Barley Breeding Programme, Cornell University
