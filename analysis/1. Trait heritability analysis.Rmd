@@ -2385,3 +2385,20 @@ H2ss<- list(H2PC, H2s, H2sp)
 save(H2PC, H2s, H2sp, file = "heritabilites_f.Rdata")
 ```
 
+
+
+## **Results: Heritability estimates**
+
+```{r, eval=TRUE}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+library(dplyr)
+load(file.path(base_path, "data/heritabilites_f.Rdata"))
+
+cat("Broad-sense H² per trait and environment:\n")
+print(H2s)
+```
+

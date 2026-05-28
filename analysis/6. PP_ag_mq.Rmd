@@ -228,3 +228,33 @@ PP_LM_results_mq_raw  <- run_pheno_models_long(data_mq, VImats[c(1,3)], model_li
 
 save(PP_LM_results_mq_raw, file= "PP_LM_results_mq_raw.Rdata")
 ```
+
+
+
+## **Results: Phenomic prediction accuracy**
+
+```{r, eval=TRUE}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+library(dplyr)
+load(file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
+load(file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
+
+ag_sum <- PP_LM_results_ag_pred$accuracy %>%
+  group_by(Trait) %>%
+  summarise(mean_r = round(mean(Accuracy, na.rm=TRUE), 3),
+            sd_r   = round(sd(Accuracy,   na.rm=TRUE), 3), .groups="drop") %>%
+  arrange(desc(mean_r))
+
+mq_sum <- PP_LM_results_mq_raw$accuracy %>%
+  group_by(Trait) %>%
+  summarise(mean_r = round(mean(Accuracy, na.rm=TRUE), 3),
+            sd_r   = round(sd(Accuracy,   na.rm=TRUE), 3), .groups="drop") %>%
+  arrange(desc(mean_r))
+
+cat("Agronomic (BLUE) — mean CV accuracy by trait:\n"); print(ag_sum)
+cat("\nMalt quality (raw) — mean CV accuracy by trait:\n"); print(mq_sum)
+```

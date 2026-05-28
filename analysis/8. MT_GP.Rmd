@@ -401,3 +401,31 @@ MT_ag_res_pr <- run_bivariate_gblup_cv_over_envs(
 
 save(MT_ag_res_pr, file = file.path(base_path, "output/MT_ag_res_pr.Rdata"))
 ```
+
+
+
+## **Results: Multi-trait GBLUP accuracy**
+
+```{r, eval=TRUE}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+library(dplyr)
+load(file.path(base_path, "output/MT_ag_res_pr.Rdata"))
+load(file.path(base_path, "output/MT_mq_res_raw_sp.Rdata"))
+
+ag_sum <- MT_ag_res_pr$results %>%
+  group_by(Trait, Cor_Trait) %>%
+  summarise(mean_r = round(mean(Cor, na.rm=TRUE), 3), .groups="drop") %>%
+  arrange(Trait, desc(mean_r))
+
+mq_sum <- MT_mq_res_raw_sp$results %>%
+  group_by(Trait, Cor_Trait) %>%
+  summarise(mean_r = round(mean(Cor, na.rm=TRUE), 3), .groups="drop") %>%
+  arrange(Trait, desc(mean_r))
+
+cat("Agronomic (BLUE) — mean MT-GBLUP accuracy by trait × correlated trait:\n"); print(ag_sum)
+cat("\nMalt quality (raw) — mean MT-GBLUP accuracy by trait × correlated trait:\n"); print(mq_sum)
+```

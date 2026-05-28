@@ -38,7 +38,7 @@ base_path <- if (.Platform$OS.type == "windows") {
 
 # Load files with constructed paths
 load(file.path(base_path, "PP_LM_results_ag_pred.Rdata"))
-load(file.path(base_path, "PP_LM_results_ag_raw.Rdata"))
+#load(file.path(base_path, "PP_LM_results_ag_raw.Rdata"))  # deprecated: pipeline now uses BLUEs for ag
 load(file.path(base_path, "PP_LM_results_mq_raw.Rdata"))
 
 # PP MM
@@ -53,25 +53,23 @@ load(file.path(base_path, "PP_MM_results_MQ_raw_sel.Rdata"))#
 
 # GBLUP GP
 load(file.path(base_path, "GP_MM_results_ag_pred.Rdata"))
-load(file.path(base_path, "GP_MM_results_ag_raw.Rdata"))
+#load(file.path(base_path, "GP_MM_results_ag_raw.Rdata"))  # deprecated: pipeline now uses BLUEs for ag
 #load(file.path(base_path, "GP_MM_results_mq_preds.Rdata"))
 load(file.path(base_path, "GP_MM_results_mq_raw.Rdata"))
 
 # MT GP
 load(file.path(base_path, "MT_mq_res_raw_sp.Rdata"))
-load(file.path(base_path, "MT_ag_res_raw_sp.Rdata"))
-load(file.path(base_path, "MT_ag_res_pr.Rdata"))#new
+#load(file.path(base_path, "MT_ag_res_raw_sp.Rdata"))  # deprecated: use MT_ag_res_pr
+load(file.path(base_path, "MT_ag_res_pr.Rdata"))
 
 # double kernel GP
 load(file.path(base_path, "GP_DK_results_ag_pr.Rdata"))
 #load(file.path(base_path, "GP_DK_results_ag_pr_sel.Rdata"))
 #load(file.path(base_path, "GP_DK_results_ag_raw.Rdata"))
-load(file.path(base_path, "GP_DK_results_ag_raw_sel.Rdata"))
+#load(file.path(base_path, "GP_DK_results_ag_raw_sel.Rdata"))  # deprecated: use GP_DK_results_ag_pr
 load(file.path(base_path, "GP_DK_results_mq_raw_sel.Rdata"))
-#load(file.path(base_path, "GP_DK_results_mq_raw_sel.Rdata"))
 #load(file.path(base_path, "GP_DK_results_mq_pr_c.Rdata"))
 #load(file.path(base_path, "GP_DK_results_mq_pr_sel.Rdata"))
-table(MT_ag_res_raw_sp$failures$Cor_Trait, MT_ag_res_raw_sp$failures$Trait)
 
 ```
 
@@ -126,23 +124,18 @@ PP_MM_master<- rbind(PP_MM_results_ag_pred_sel, PP_MM_results_ag_pred_comb,  PP_
 
 **Merge LM RF, PCR** 
 ```{r}
-names(PP_LM_results_ag_pred)<- names(PP_LM_results_ag_raw)
 PP_LM_results_ag_pred$accuracy$met <- "LM_ag_pred"
-PP_LM_results_ag_raw$accuracy$met  <- "LM_ag_raw"
 PP_LM_results_mq_raw$accuracy$met  <- "LM_mq_raw"
 
 PP_LM_results_ag_pred$accuracy$mod <- "LM"
-PP_LM_results_ag_raw$accuracy$mod  <- "LM"
 PP_LM_results_mq_raw$accuracy$mod  <- "LM"
 
 PP_LM_results_ag_pred$accuracy$BLUE<- "Two"
-PP_LM_results_ag_raw$accuracy$BLUE <- "One"
 PP_LM_results_mq_raw$accuracy$BLUE <- "One"
 
 PP_LM_results_ag_pred$accuracy$sel <- "comb"
-PP_LM_results_ag_raw$accuracy$sel  <- "comb"
 PP_LM_results_mq_raw$accuracy$sel  <- "comb"
-PP_LM_master<- rbind(PP_LM_results_ag_pred$accuracy, PP_LM_results_ag_raw$accuracy, PP_LM_results_mq_raw$accuracy)
+PP_LM_master<- rbind(PP_LM_results_ag_pred$accuracy, PP_LM_results_mq_raw$accuracy)
 
 colnames(PP_MM_master)[3]<- "Accuracy"
 colnames(PP_MM_master)[4]<- "Cycle"
@@ -241,24 +234,15 @@ table(PP_LM_MM_accuracy$Environment, PP_LM_MM_accuracy$Trait)
 **Merge GP**
 ```{r}
 GP_MM_results_ag_pred$results$BLUE<- "Two"
-GP_MM_results_ag_raw$results$BLUE<- "One"
 GP_MM_results_mq_raw$results$BLUE<- "One"
-#GP_MM_results_mq_preds$results$BLUE<- "Two"
 
 GP_MM_results_ag_pred$results$met <- "GP"
-GP_MM_results_ag_raw$results$met <- "GP"
 GP_MM_results_mq_raw$results$met <- "GP"
-#GP_MM_results_mq_preds$results$met <- "GP"
-
 
 colnames(GP_MM_results_ag_pred$results)
-#colnames(GP_MM_results_mq_preds$results)
-colnames(GP_MM_results_ag_raw$results)
 colnames(GP_MM_results_mq_raw$results)
-colnames(GP_MM_results_ag_pred$results)
-#colnames(GP_MM_results_mq_preds$results)[5]<- "Cor"
 
-GP_MM_master <- rbind(GP_MM_results_ag_pred$results[,-5], GP_MM_results_ag_raw$results[,-5], GP_MM_results_mq_raw$results[,-5])#, #GP_MM_results_mq_preds$results$)
+GP_MM_master <- rbind(GP_MM_results_ag_pred$results[,-5], GP_MM_results_mq_raw$results[,-5])
 
 
 unique(GP_MM_master$Trait)
@@ -277,12 +261,12 @@ GP_MM_master$type<- NA
 
 **Merge MT GP**
 ```{r}
-summary(MT_ag_res_raw_sp$results$Cor)
+summary(MT_ag_res_pr$results$Cor)
 
-MT_ag_res_raw_sp$results$BLUE = "One"
+MT_ag_res_pr$results$BLUE = "Two"
 MT_mq_res_raw_sp$results$BLUE = "One"
 
-MT_res_raw<- rbind(MT_ag_res_raw_sp$results, MT_mq_res_raw_sp$results)
+MT_res_raw<- rbind(MT_ag_res_pr$results, MT_mq_res_raw_sp$results)
 colnames(MT_res_raw)
 MT_res_raw<- MT_res_raw[-4:-5]
 #MT_res_raw$BLUE<- "One"
@@ -295,8 +279,6 @@ MT_res_raw$met<- "MT"
 ```{r}
 #GP_DK_results_ag_pr$results$type<- "comb"
 GP_DK_results_ag_pr$results$type<- "sel"
-#GP_DK_results_ag_raw_c$results$type<- "comb"
-GP_DK_results_ag_raw_sel$results$type<- "sel"
 
 #GP_DK_results_mq_pr_c$results$type<- "comb"
 #GP_DK_results_mq_pr_sel$results$type<- "sel"
@@ -313,7 +295,7 @@ GP_DK_results_mq_raw_sel$results$type<- "sel"
 #GP_DK_results_mq_pr_sel$failures$type<- "sel"
 
 
-GP_DK_res<- rbind(GP_DK_results_ag_pr$results,  GP_DK_results_ag_raw_sel$results,  GP_DK_results_mq_raw_sel$results)#, GP_DK_results_mq_pr_sel$results, GP_DK_results_mq_raw_c$results,GP_DK_results_ag_pr_c$results, GP_DK_results_ag_raw_c$results, GP_DK_results_mq_pr_c$results,)
+GP_DK_res<- rbind(GP_DK_results_ag_pr$results, GP_DK_results_mq_raw_sel$results)
 
 #GP_DK_fail<- rbind(GP_DK_results_ag_pr_c$failures, GP_DK_results_ag_pr_sel$failures, GP_DK_results_ag_raw_c$failures, GP_DK_results_ag_raw_sel$failures, GP_DK_results_mq_pr_c$failures, GP_DK_results_mq_pr_sel$failures)
 
@@ -596,14 +578,11 @@ PP_LM_MM_accuracy12 %>%
   arrange(Environment)
 
 
-data_ag%>%
-  group_by(Env) %>%
-  summarise(
-    mean_WS = mean(winter_survival, na.rm = TRUE),
-    min = min(winter_survival, na.rm= TRUE), 
-    max = max(winter_survival, na.rm = TRUE))
-    .groups = "drop"
-  )
+# data_ag not available in this script (raw phenotype file); skip winter survival summary
+# data_ag %>% group_by(Env) %>%
+#   summarise(mean_WS = mean(winter_survival, na.rm=TRUE),
+#             min = min(winter_survival, na.rm=TRUE),
+#             max = max(winter_survival, na.rm=TRUE), .groups="drop")
 ```
 
 
@@ -1137,14 +1116,11 @@ ggplot(anova_plot_df, aes(x = reorder(Effect, perc_var), y = perc_var)) +
   )
 
 
-eta_sq <- eta_squared(anova_mod, partial = FALSE)
-ggplot(eta_sq, aes(x = reorder(Parameter, Eta2), y = Eta2 * 100)) +
-  geom_col(fill = "grey40") +
-  labs(
-    x = "Effect",
-    y = "% Variance Explained (Eta²)"
-  ) +
-  theme_bw()
+# eta_sq <- eta_squared(anova_mod, partial = FALSE)  # requires effectsize package
+# ggplot(eta_sq, aes(x = reorder(Parameter, Eta2), y = Eta2 * 100)) +
+#   geom_col(fill = "grey40") +
+#   labs(x = "Effect", y = "% Variance Explained (Eta²)") +
+#   theme_bw()
 ```
 
 

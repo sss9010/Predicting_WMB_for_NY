@@ -69,7 +69,7 @@ colnames(data_sp)
 
 ## **3. Fit simple BLUE model for spec**
 
-```{r}
+```{r, eval=FALSE}
 envs    <-  unique(data_sp$Env)
 traits <- colnames(data_sp)[c(5,13)]
 raw_dat <- data_sp %>% left_join(data_ag[,c(1,5,6)], by= "plot_id")
@@ -163,7 +163,7 @@ save(preds,  file = "spec_BLUE_spatial.RData")
 
 ## **4. Fit simple BLUE model for ag**
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 envs    <- unique(data_ag$Env)
 traits <- colnames(data_ag)[c(7:9)]
 raw_dat <- data <-  data_ag                                   
@@ -237,6 +237,27 @@ save(preds,  file = "data/ag_BLUE_spatial.RData")
 ```
 
 
+
+## **5. Saved BLUE results**
+
+```{r, eval=TRUE}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+
+load(file.path(base_path, "data/spec_BLUE_spatial.RData"))
+spec_preds <- preds
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+ag_preds <- preds
+
+cat("Spectral BLUEs — environments × VI:\n")
+print(table(spec_preds$Env, spec_preds$VI))
+
+cat("\nAgronomic BLUEs — environments × trait:\n")
+print(table(ag_preds$Env, ag_preds$VI))
+```
 
 ## **5. Create a VI matrix of VI BLUEs**
 
