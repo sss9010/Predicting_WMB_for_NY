@@ -1,7 +1,7 @@
-﻿---
-title: "2. Trait heritability analysis"
+---
+title: "1. Trait heritability analysis"
 author: "sss322"
-date: "2025-04-11"
+date: "2026-05-25"
 output: html_document
 ---
 
@@ -17,7 +17,7 @@ This document provides cotains the heritability calculation for multi-spectral d
 
 ## **0. Import packages and data**
 ```{r, message=FALSE}
-pkgs <- c("MASS","dplyr","tidyr","asreml","ASRtriala","ASRgenomics",
+pkgs <- c("MASS","dplyr","tidyr","tidyverse", "asreml","ASRtriala","ASRgenomics", "magrittr",
           "ggplot2","openxlsx","workflowr","readxl", "forcats", "scales", "corrplot")
 suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
 Sys.setenv(LANG = "en")

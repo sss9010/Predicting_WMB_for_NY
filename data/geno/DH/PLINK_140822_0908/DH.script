@@ -1,9 +1,0 @@
---noweb
---ped C:\Users\kars8\git\NY-winter-barley-analysis\data\genotypes\DH\PLINK_140822_0908\DH.ped
---map C:\Users\kars8\git\NY-winter-barley-analysis\data\genotypes\DH\PLINK_140822_0908\DH.map
---out C:\Users\kars8\git\NY-winter-barley-analysis\data\genotypes\DH\PLINK_140822_0908\DH.out
---assoc
---pfilter 1e-4
---adjust
---cm
-

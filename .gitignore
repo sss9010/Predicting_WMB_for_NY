@@ -30,3 +30,4 @@ data/geno/*.log
 data/geno/*.nosex
 data/geno/PLINK_*/
 data/geno/RIL/VCF/
+.positai

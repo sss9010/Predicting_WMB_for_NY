@@ -5,14 +5,17 @@
 
 A reproducible R analysis pipeline for predicting **agronomic** and **malt quality** traits in the NY Winter Malting Barley (WMB) breeding program, combining UAV multispectral drone imagery, Barley 50K SNP genotype data, and multi-year field phenotypes across five environments (2021–2025).
 
+TLDR: Malt quality analysis is a considerable cost in barley breeding programs. Can UAVs be used to accelerate genetic gain and predict breeding values and phenotypes within field? Yes, but... Phenomic prediction works better for agronomic traits and within years with more severe winter stress. Genomic prediction benefits from including a correlated traits and varies in effectiveness depending on the trait. Many factors must be weighed before integrating these approaches into breeding programs, but the signal is there. Sometimes more, sometimes less. 
+
+More info: https://cals.cornell.edu/field-crops/small-grains/small-grains-breeding-and-genetics
 ---
 
 ## Overview
 
 This project develops and benchmarks a suite of prediction models for barley breeding selection, using three complementary data layers:
 
-- **Spectral:** NDVI, NDRE, PSRI, and additional vegetation indices from UAV multispectral flights at multiple timepoints per season
-- **Genotype:** Barley 50K SNP array mapped to the Morex V3 assembly, covering DH, RIL, and Winter line populations
+- **Spectral:** NDVI and PSRI from UAV multispectral flights at multiple timepoints per season
+- **Genotype:** Barley 50K SNP array mapped to the Morex V3 assembly
 - **Phenotype:** Yield, heading date, and 12 malt quality traits (extract, protein, β-glucan, FAN, diastatic power, etc.)
 
 Prediction approaches range from classical mixed models to machine learning and deep learning:
@@ -23,7 +26,6 @@ Prediction approaches range from classical mixed models to machine learning and 
 | Genomic prediction | GBLUP with spatial AR1×AR1 correction |
 | Multi-trait genomic prediction | Bivariate GBLUP using spectral VIs as correlated helper traits |
 | Double-kernel | Combined genomic + phenomic relationship kernels |
-| Deep learning | DNN synthetic vegetation indices with leave-one-environment-out CV |
 
 ---
 
@@ -116,4 +118,4 @@ If you use this pipeline or results, please cite:
 
 ## Contact
 
-Siim Sepp · s11ms3pp@gmail.com
+Siim Sepp · sss@322cornell.edu
