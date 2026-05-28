@@ -32,21 +32,16 @@ The numbered `.Rmd` files in `analysis/` follow a sequential pipeline:
 
 | File | Purpose |
 |------|---------|
-| `E1. Multi_spec_pre_processing.Rmd` | Import QGIS zonal statistics from drone flights, compute vegetation indices (NDVI, NDRE), QC and merge with plot IDs |
-| `E2. Spectral_data_BLUP_new.Rmd` | Fit spatial mixed models on spectral/VI data to obtain BLUPs |
-| `E3. Trait_spatial_mod_tester.Rmd` | Test spatial correction models for individual traits |
-| `1. Data_Pre_Processing.Rmd` | Load pedigree, genotype (HapMap), and phenotype data; merge all datasets |
-| `2. Trait heritability analysis.Rmd` | Heritability estimation for VI, malt quality, and agronomic traits via ASReml |
-| `3. Spectral_data_BLUE.Rmd` | Compute BLUEs for spectral traits |
-| `4. Exploratory_pheno_ analysis.Rmd` | Exploratory phenotypic analysis and visualization |
-| `5. F_PCA.Rmd` | PCA on phenotypic/spectral data |
-| `6. Phenomic kernel_build.Rmd` | Build phenomic relationship matrices from VI data for genomic prediction |
-| `7. PP_ag_mq.Rmd` | Phenomic prediction for agronomic and malt quality traits |
-| `8. GP_ag_mq.Rmd` | Genomic prediction (GBLUP) for agronomic and malt quality traits |
-| `9. MT_GP.Rmd` | Multi-trait genomic prediction |
-| `10. master_models.Rmd` | Combined/master prediction models |
-| `11.DK_GP.Rmd` | Double-kernel genomic prediction |
-| `12. Prediction_plots.Rmd` | Visualization of prediction results |
+| `1. Trait heritability analysis.Rmd` | Heritability estimation for VI, malt quality, and agronomic traits via ASReml |
+| `2. Exploratory_pheno_ analysis.Rmd` | Exploratory phenotypic analysis and visualization |
+| `3. Spectral_data_BLUE.Rmd` | Spatial BLUE models for spectral and agronomic traits; build VI time-series matrix |
+| `4. F_PCA.Rmd` | PCA and FPCA on spectral time-series; extract functional principal components |
+| `5. Phenomic kernel_build.Rmd` | Build phenomic relationship matrices from VI data for genomic prediction |
+| `6. PP_ag_mq.Rmd` | Phenomic prediction for agronomic (BLUE) and malt quality (raw) traits |
+| `7. GP_ag_mq.Rmd` | Genomic prediction (GBLUP) for agronomic (BLUEs) and malt quality (raw) traits |
+| `8. MT_GP.Rmd` | Multi-trait GBLUP using spectral VIs and FPCs as correlated helper traits |
+| `10.DK_GP.Rmd` | Double-kernel GBLUP (genomic G + phenomic P kernels) |
+| `11. Prediction_plots.Rmd` | Visualization and cross-method comparison of prediction accuracies |
 
 ## Key R Packages
 

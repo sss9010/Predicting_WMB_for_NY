@@ -1,4 +1,4 @@
----
+﻿---
 title: "3. Spectral data Spatial BLUE"
 output: html_document
 author: "sss322"
@@ -46,15 +46,14 @@ Sys.setlocale("LC_TIME", "C")
 ## **2. Setting the working directory and importing the data**
 
 ```{r, message=FALSE}
-#load("C:/Users/Siim Sepp/NY_WMB/data/WMB_pheno_all.Rdata")
-load("C:/Users/Siim Sepp/NY_WMB/data/data_sp.Rdata")
-load("C:/Users/Siim Sepp/NY_WMB/data/data_mq.Rdata")
-load("C:/Users/Siim Sepp/NY_WMB/data/data_ag.Rdata")
-
-#load("~/Documents/GitHub/NY_WMB/data/WMB_pheno_all.Rdata")
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+load(file.path(base_path, "data/data_sp.Rdata"))
+load(file.path(base_path, "data/data_ag.Rdata"))
 table(data_sp$Env, data_sp$Timepoint)
-table(data_mq$Env)
-data_mq1<- data_mq %>% drop_na()
 ```
 
 ```{r, message=FALSE}
@@ -162,21 +161,7 @@ save(preds,  file = "spec_BLUE_spatial.RData")
 
 
 
-## **4. Adding flight time data to the predicitons and filter for QC**
-
-```{r}
-load("C:/Users/Siim Sepp/NY_WMB/data/wmb_multi_alldata.Rdata")
-colnames(multi)
-# Create a mapping of timepoint to JD
-timepoint_JD <- multi[,c(1,3, 10,31)] %>%
-  distinct()  
-colnames(timepoint_JD)[2] <- "Timepoint"
-timepoint_JD
-```
-
-
-
-## **5. Fit simple BLUE model for ag**
+## **4. Fit simple BLUE model for ag**
 
 ```{r, eval=TRUE}
 envs    <- unique(data_ag$Env)
@@ -253,95 +238,7 @@ save(preds,  file = "data/ag_BLUE_spatial.RData")
 
 
 
-## **6. Fit simple BLUP model for MQ**
-
-```{r}
-envs    <- c("MCG23","HELF24")#, "MCG25")
-traits <- colnames(data_mq)[4:15]
-
-#data_mq<- left_join(data_mq, data_ag[,c(2,5,6)], by= "plot_id")
-raw_dat <- data <-  data_mq %>% na.omit() %>% droplevels()
-str(raw_dat)
-## -------------------------------------------------------------
-fit_list  <- list()   
-pred_list <- list()
-data$GID<- as.character(data$GID)
-
-## -----------------------------------------------------------------
-
-for (tr in traits) {
-
-  fits_vi <- list()
-
-  for (e in envs) {
-    
-          dat_sub <- raw_dat %>%
-        filter(Env == e) %>%
-        mutate(
-          GID = factor(GID),
-          Row = factor(Row),
-          Col = factor(Column)
-        )
-
-      ## model -----------------------------------------------------------------
-      mod <- tryCatch(
-        asreml(
-          fixed    = reformulate("1", response = tr),   #  ~ 1
-          random   = ~GID + ~ar1(Row):ar1(Column),                             # genotype effect
-          residual = ~ units,               # spatial correction
-          data     = dat_sub
-        ),
-        error = function(err) {
-          message("asreml failed for ", tr, " | ", e,
-                  " : ", err$message)
-          NULL
-        }
-      )
-
-      ## store fit -------------------------------------------------------------
-      fits_vi[[paste(e,  sep = "_")]] <- mod
-
-      ## predictions -----------------------------------------------------------
-      if (!is.null(mod)) {
-  pred <- tryCatch({
-    predict(mod, classify = "GID")$pvals %>%
-      as_tibble() %>%
-      transmute(
-        VI        = tr,
-        Env       = e,
-        GID,
-        Predicted = predicted.value,
-        SE        = std.error
-      )
-  },
-  error = function(err) {
-    message("asreml predict failed for ", tr, " | ", e,
-            " : ", err$message)
-    NULL
-  })
-
-  if (!is.null(pred)) {
-    pred_list[[length(pred_list) + 1]] <- pred
-  }
-}
-  }   # environment loop
-
-  fit_list[[tr]] <- fits_vi
-}     # trait loop
-
-## -----------------------------------------------------------------
-##  tidy table of all predictions
-## -----------------------------------------------------------------
-preds <- bind_rows(pred_list)
-table(preds$Env)
-##  optional saves
-save(fit_list, file = "data/mq_BLUP_spatial_fits.RData")
-save(preds,  file = "data/mq_BLUP_spatial.RData")
-```
-
-
-
-## **7. Create a VI matrix of VI BLUPS. **
+## **5. Create a VI matrix of VI BLUEs**
 
 ```{r}
 load("spec_BLUE_spatial.RData")

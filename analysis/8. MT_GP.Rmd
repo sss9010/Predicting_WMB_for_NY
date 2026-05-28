@@ -1,0 +1,403 @@
+﻿---
+title: "9. MT_GP"
+author: "sss322"
+date: "2025-07-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## **0. Importing the dependencies**
+
+```{r}
+library(dplyr)
+library(asreml)
+library(ggplot2)
+library(ASRgenomics)
+library(readxl)
+library(MASS)
+library(tidyr)
+library(caret)
+```
+
+
+
+
+## **1. Importing the phenotypic data**
+
+```{r}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+
+load(file.path(base_path, "data/data_mq.Rdata"))
+load(file.path(base_path, "data/MT_raw_wide.Rdata"))
+data_mq <- data_mq %>% na.omit()
+```
+
+
+## **2. Assembling the phenotype data**
+
+```{r}
+# raw VI join for MQ MT GP
+corVI_raw <- data.frame(
+  plot_id = c(
+    rownames(MT_raw_w$KET21_4),
+    rownames(MT_raw_w$SNY22_6),
+    rownames(MT_raw_w$MCG23_5),
+    rownames(MT_raw_w$HELF24_7),
+    rownames(MT_raw_w$MCG25_12)
+  ),
+  NDVI = c(
+    MT_raw_w$KET21_4[, 1],
+    MT_raw_w$SNY22_6[, 1],
+    MT_raw_w$MCG23_5[, 1],
+    MT_raw_w$HELF24_7[, 1],
+    MT_raw_w$MCG25_12[, 1]
+  ),
+  PSRI = c(
+    MT_raw_w$KET21_4[, 9],
+    MT_raw_w$SNY22_6[, 9],
+    MT_raw_w$MCG23_5[, 9],
+    MT_raw_w$HELF24_7[, 9],
+    MT_raw_w$MCG25_12[, 9]
+  )
+)
+
+MT_mq_raw_df <- left_join(data_mq, corVI_raw, by = "plot_id")
+
+
+# pred VI join for agronomic MT GP
+load(file.path(base_path, "data/MT_pred_wide.Rdata"))
+corVI_pr <- data.frame(
+  GID = c(
+    rownames(MT_pr_w$KET21_4),
+    rownames(MT_pr_w$SNY22_6),
+    rownames(MT_pr_w$MCG23_5),
+    rownames(MT_pr_w$HELF24_7),
+    rownames(MT_pr_w$MCG25_12)
+  ),
+  NDVI = c(
+    MT_pr_w$KET21_4[, 1],
+    MT_pr_w$SNY22_6[, 1],
+    MT_pr_w$MCG23_5[, 1],
+    MT_pr_w$HELF24_7[, 1],
+    MT_pr_w$MCG25_12[, 1]
+  ),
+  PSRI = c(
+    MT_pr_w$KET21_4[, 9],
+    MT_pr_w$SNY22_6[, 9],
+    MT_pr_w$MCG23_5[, 9],
+    MT_pr_w$HELF24_7[, 9],
+    MT_pr_w$MCG25_12[, 9]
+  ),
+  Env = c(
+    rep("KET21",  nrow(MT_pr_w$KET21_4)),
+    rep("SNY22",  nrow(MT_pr_w$SNY22_6)),
+    rep("MCG23",  nrow(MT_pr_w$MCG23_5)),
+    rep("HELF24", nrow(MT_pr_w$HELF24_7)),
+    rep("MCG25",  nrow(MT_pr_w$MCG25_12))
+  ),
+  stringsAsFactors = FALSE
+)
+
+# merge agronomic BLUEs
+load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+preds <- preds[, -5] %>% pivot_wider(values_from = "Predicted", names_from = "VI")
+preds <- preds %>% na.omit()
+MT_ag_pr_df <- left_join(preds, corVI_pr, by = c("GID", "Env"))
+```
+
+
+
+
+Adding the FPC and PCA data
+```{r}
+load(file.path(base_path, "data/F_PCA_scoresG.Rdata"))
+FPC_scores <- FPCA_scores_df %>%
+  filter(VI %in% c("NDVI", "PSRI")) %>%
+  pivot_wider(names_from = VI, values_from = colnames(FPCA_scores_df[1:3]))
+
+MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[, -2], by = c("plot_id"))
+```
+
+
+
+
+## **3. MT_GBLUP function and env loop function**
+
+
+```{r}
+
+safe_cor <- function(x, y) {
+  ok <- stats::complete.cases(x, y)
+  if (sum(ok) < 2L) return(NA_real_)
+  x <- x[ok]; y <- y[ok]
+  if (stats::sd(x) == 0 || stats::sd(y) == 0) return(NA_real_)
+  suppressWarnings(stats::cor(x, y))
+}
+
+
+
+run_bivariate_gblup_cv <- function(data, A1, traits, cor_traits,
+                                   reps = 5, folds = 5, spatial = FALSE,
+                                   mask = c("j_only", "both", "i_only"),
+                                   env_label = NA_character_) {
+  mask <- match.arg(mask)
+  res_all  <- data.frame()
+  fail_log <- list()
+
+  GIDs_global <- intersect(unique(as.character(data$GID)), rownames(A1))
+  if (length(GIDs_global) == 0L) {
+    warning("[", env_label, "] No common GIDs between data and A1.")
+    return(list(results = data.frame(), failures = data.frame()))
+  }
+  A1_sub    <- A1[GIDs_global, GIDs_global]
+  Ghat.bend <- G.tuneup(G = A1_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv      <- G.inverse(Ghat.bend)$Ginv
+
+  for (i in cor_traits) {
+    for (j in traits) {
+      if (i == j) next
+
+      message("\n[", env_label, "] Fitting model: ", paste0("cbind(", i, ", ", j, ") ~ trait"))
+
+      all_traits <- c(i, j)
+      df_sub <- data[, c("GID", "Row", "Column", all_traits), drop = FALSE]
+      df_sub <- df_sub[df_sub$GID %in% GIDs_global, , drop = FALSE]
+      if (nrow(df_sub) == 0L) next
+
+      df_sub$GID <- factor(as.character(df_sub$GID), levels = GIDs_global)
+
+      for (rep_run in seq_len(reps)) {
+        gids_present <- unique(as.character(df_sub$GID))
+        fold_gid     <- sample(rep(seq_len(folds), length.out = length(gids_present)))
+        names(fold_gid) <- gids_present
+        fold_ids <- fold_gid[as.character(df_sub$GID)]
+
+        for (f in seq_len(folds)) {
+          df_cv       <- df_sub
+          df_cv$units <- seq_len(nrow(df_cv))
+
+          df_long <- rbind(
+            data.frame(GID = df_cv$GID, Row = df_cv$Row, Column = df_cv$Column,
+                       trait = i, value = df_cv[[i]], units = df_cv$units),
+            data.frame(GID = df_cv$GID, Row = df_cv$Row, Column = df_cv$Column,
+                       trait = j, value = df_cv[[j]], units = df_cv$units)
+          )
+          df_long$GID <- factor(as.character(df_long$GID), levels = rownames(Ginv))
+          df_long$trait <- factor(df_long$trait, levels = c(i, j))
+          df_long$fold  <- rep(fold_ids, times = 2)
+
+          if (mask == "j_only") {
+            df_long$value[df_long$trait == j & df_long$fold == f] <- NA
+          } else if (mask == "i_only") {
+            df_long$value[df_long$trait == i & df_long$fold == f] <- NA
+          } else if (mask == "both") {
+            df_long$value[df_long$fold == f] <- NA
+          }
+
+          if (spatial) {
+            rand_formula <- ~ vm(GID, Ginv):corgh(trait) + ar1(Row):ar1(Column)
+            res_formula  <- ~ idv(units)
+            df_long$Row    <- as.factor(df_long$Row)
+            df_long$Column <- as.factor(df_long$Column)
+          } else {
+            rand_formula <- ~ vm(GID, Ginv):corgh(trait)
+            res_formula  <- ~ idv(units)
+          }
+
+          mod_cv <- tryCatch({
+            asreml(
+              fixed     = value ~ trait,
+              random    = rand_formula,
+              residual  = res_formula,
+              data      = df_long,
+              na.action = list(x = "include", y = "include"),
+              workspace = 7e8,
+              maxit     = 100,
+              ai.sing   = TRUE,
+              trace     = FALSE
+            )
+          }, error = function(e) {
+            fail_log[[length(fail_log) + 1L]] <<- data.frame(
+              Env = env_label, Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f,
+              Stage = "model", Error = e$message, stringsAsFactors = FALSE
+            )
+            return(NULL)
+          })
+          if (is.null(mod_cv)) next
+
+          if (!mod_cv$converge) {
+            mod_cv <- tryCatch(update(mod_cv), error = function(e) mod_cv)
+          }
+
+          pred_cv <- tryCatch({
+            p <- predict(mod_cv, classify = "GID:trait")$pvals
+            p <- p[p$trait == j, , drop = FALSE]
+            colnames(p)[colnames(p) == "predicted.value"] <- "BV_cv"
+            p
+          }, error = function(e) {
+            fail_log[[length(fail_log) + 1L]] <<- data.frame(
+              Env = env_label, Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f,
+              Stage = "predict", Error = e$message, stringsAsFactors = FALSE
+            )
+            return(NULL)
+          })
+          if (is.null(pred_cv)) next
+
+          test_gids <- names(fold_gid)[fold_gid == f]
+          truth <- df_sub[as.character(df_sub$GID) %in% test_gids, c("GID", j), drop = FALSE]
+          colnames(truth)[2] <- "true"
+          truth <- truth[!is.na(truth$true), , drop = FALSE]
+          if (nrow(truth) < 2L) next
+          truth <- aggregate(true ~ GID, data = truth, FUN = mean, na.rm = TRUE)
+
+          merged  <- merge(truth, pred_cv[, c("GID", "BV_cv")], by = "GID", all = FALSE)
+          cor_val <- if (nrow(merged) >= 2L) safe_cor(merged$BV_cv, merged$true) else NA_real_
+
+          res_all <- rbind(res_all, data.frame(
+            Env = env_label, Trait = j, Cor_Trait = i, Rep = rep_run, Fold = f, Cor = cor_val,
+            stringsAsFactors = FALSE))
+        }
+      }
+    }
+  }
+
+  list(results = res_all,
+       failures = if (length(fail_log)) do.call(rbind, fail_log) else NULL)
+}
+
+```
+
+
+
+
+```{r}
+run_bivariate_gblup_cv_over_envs <- function(MT_raw_ag, A1,
+                                             envs,
+                                             traits,
+                                             cor_traits,
+                                             reps = 5, folds = 5,
+                                             spatial = FALSE,
+                                             mask = c("j_only", "both", "i_only")) {
+  mask <- match.arg(mask)
+  all_res  <- list()
+  all_fail <- list()
+
+  for (e in envs) {
+    message("\n================ ENV: ", e, " ================")
+    dat_e <- MT_raw_ag[MT_raw_ag$Env == e, , drop = FALSE]
+
+    if (nrow(dat_e) == 0L) {
+      warning("No rows for Env = ", e)
+      next
+    }
+
+    present_traits <- intersect(traits, names(dat_e))
+    present_cor    <- intersect(cor_traits, names(dat_e))
+    if (length(present_traits) == 0L || length(present_cor) == 0L) {
+      warning("No overlapping traits/cor_traits in Env = ", e)
+      next
+    }
+
+    dat_e$GID <- as.factor(dat_e$GID)
+    dat_e$Row    <- factor(dat_e$Row,
+                           levels = sort(unique(as.integer(as.character(dat_e$Row)))))
+    dat_e$Column <- factor(dat_e$Column,
+                           levels = sort(unique(as.integer(as.character(dat_e$Column)))))
+
+    out <- run_bivariate_gblup_cv(
+      data       = dat_e,
+      A1         = A1,
+      traits     = present_traits,
+      cor_traits = present_cor,
+      reps       = reps,
+      folds      = folds,
+      spatial    = spatial,
+      mask       = mask,
+      env_label  = e
+    )
+
+    if (!is.null(out$results) && nrow(out$results) > 0L)
+      all_res[[length(all_res) + 1L]] <- out$results
+
+    if (!is.null(out$failures) && nrow(out$failures) > 0L)
+      all_fail[[length(all_fail) + 1L]] <- out$failures
+  }
+
+  list(
+    results  = if (length(all_res)) dplyr::bind_rows(all_res) else NULL,
+    failures = if (length(all_fail)) dplyr::bind_rows(all_fail) else NULL
+  )
+}
+
+```
+
+
+
+## **4. Setup**
+
+```{r}
+envs    <- c("KET21", "SNY22", "MCG23", "HELF24", "MCG25")
+mqtrait <- c("KernelWeight.mg.", "on6.64....", "MaltExtract...", "BarleyProtein..",
+             "WortProtein...", "S.T", "DP..ASBC.", "Alpha.amylase.20.DU.",
+             "Beta.glucan.ppm.", "FAN.ppm.", "AdjunctQualityScore", "All_MaltQualityScore")
+agtraits   <- c("yield_kgha", "HD_JD")
+cor_traits <- c("NDVI", "PSRI", "FPC1_NDVI", "FPC1_PSRI", "FPC2_NDVI", "FPC2_PSRI",
+                "FPC3_NDVI", "FPC3_PSRI")
+load(file.path(base_path, "data/geno/WMB_master_geno.RData"))
+```
+
+
+
+## **5. MT_GBLUP MQ raw**
+
+```{r}
+MT_raw_MQ$GID    <- as.character(MT_raw_MQ$GID)
+MT_raw_MQ$Column <- as.character(MT_raw_MQ$Column)
+MT_raw_MQ$Row    <- as.character(MT_raw_MQ$Row)
+
+envs <- unique(MT_raw_MQ$Env)
+MT_mq_res_raw_sp <- run_bivariate_gblup_cv_over_envs(
+  MT_raw_MQ, A1,
+  envs       = envs,
+  traits     = mqtrait,
+  cor_traits = cor_traits,
+  reps = 50, folds = 5,
+  spatial = TRUE,
+  mask = "j_only"
+)
+
+save(MT_mq_res_raw_sp, file = file.path(base_path, "output/MT_mq_res_raw_sp.Rdata"))
+
+table(MT_mq_res_raw_sp$results$Cor_Trait)
+boxplot(MT_mq_res_raw_sp$results$Cor ~ MT_mq_res_raw_sp$results$Trait)
+```
+
+
+
+
+## **6. MT_GBLUP agronomic pred**
+
+```{r}
+MT_ag_pr_df$Row    <- NA
+MT_ag_pr_df$Column <- NA
+envs <- unique(MT_ag_pr_df$Env)
+
+MT_ag_res_pr <- run_bivariate_gblup_cv_over_envs(
+  MT_ag_pr_df, A1,
+  envs       = envs,
+  traits     = agtraits,
+  cor_traits = cor_traits,
+  reps = 50, folds = 5,
+  spatial = FALSE,
+  mask = "j_only"
+)
+
+save(MT_ag_res_pr, file = file.path(base_path, "output/MT_ag_res_pr.Rdata"))
+```

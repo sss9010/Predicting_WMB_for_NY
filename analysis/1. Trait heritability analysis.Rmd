@@ -1,0 +1,2387 @@
+﻿---
+title: "2. Trait heritability analysis"
+author: "sss322"
+date: "2025-04-11"
+output: html_document
+---
+
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, results = "hide", eval = FALSE)
+```
+
+
+### **Introduction**
+This document provides cotains the heritability calculation for multi-spectral drone imagery vegetative indices, maltinq quality and agronomic traits. The goal is to assess the heritability of all traits and choose the ones to proceed with.
+
+
+## **0. Import packages and data**
+```{r, message=FALSE}
+pkgs <- c("MASS","dplyr","tidyr","asreml","ASRtriala","ASRgenomics",
+          "ggplot2","openxlsx","workflowr","readxl", "forcats", "scales", "corrplot")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+Sys.setenv(LANG = "en")
+Sys.setlocale("LC_TIME", "C")
+```
+
+```{r}
+paths <- c("C:/Users/Siim Sepp/Predicting_WMB_for_NY/data",
+           "~/Documents/GitHub/Predicting_WMB_for_NY/data",
+           "data")
+
+files <- c("data_ag.Rdata","data_mq.Rdata","data_sp.Rdata","VImat.Rdata")
+
+load_first <- function(fname, dirs = paths) {
+  for (d in dirs) {
+    p <- file.path(path.expand(d), fname)
+    if (file.exists(p)) { load(p, envir = .GlobalEnv); return(invisible(p)) }
+  }
+  stop("File not found in any known location: ", fname)
+}
+invisible(lapply(files, load_first))
+```
+
+
+
+
+
+## **1. Calculating heritabilites.** 
+
+
+
+### **1.1 Heritability for malting quality traits**
+```{r}
+# ==============================================================================
+# HERITABILITY ANALYSIS FOR MALT QUALITY TRAITS
+# Using genomic relationship matrix
+# ==============================================================================
+
+data_mq <- data_mq %>%
+  mutate(
+    Env = factor(Env),
+    GID = factor(GID),
+    Fam = factor(Fam)
+  )
+
+# Define traits and environments
+traits <- colnames(data_mq)[4:15]
+envs <- levels(data_mq$Env)
+
+cat("Malt Quality Traits:", paste(traits, collapse = ", "), "\n")
+cat("Environments:", paste(envs, collapse = ", "), "\n\n")
+cat("Sample sizes by environment:\n")
+print(table(data_mq$Env))
+
+# Load genomic relationship matrix
+load("data/geno/WMB_master_geno.RData")  # Contains A1 matrix
+cat("\nGenomic relationship matrix loaded. Dimension:", dim(A1), "\n\n")
+
+# ==============================================================================
+# SINGLE-ENVIRONMENT HERITABILITY FOR MALT QUALITY
+# ==============================================================================
+
+calculate_h2_mq_single <- function(data, env, trait, A_matrix) {
+  
+  cat("\n========================================\n")
+  cat("Environment:", env, "| Trait:", trait, "\n")
+  cat("========================================\n")
+  
+  # Filter data
+  data_subset <- data %>%
+    filter(Env == env) %>%
+    filter(!is.na(!!sym(trait))) %>%
+    filter(!!sym(trait) > 0) %>%  # Remove zeros/negatives if needed
+    filter(!is.na(Fam), !is.na(GID)) %>%
+    droplevels()
+  
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  n_fam <- length(unique(data_subset$Fam))
+  
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n")
+  cat("Families:", n_fam, "\n")
+  
+  if (n_obs < 10 || n_geno < 5) {
+    cat("Insufficient data\n")
+    return(NULL)
+  }
+  
+  # Match kinship to phenotype data
+  indp <- data_subset$GID %in% rownames(A_matrix)
+  data_subset <- data_subset[indp, ]
+  
+  indg <- rownames(A_matrix) %in% data_subset$GID
+  A_sub <- A_matrix[indg, indg]
+  
+  cat("After matching: n =", nrow(data_subset), ", genotypes =", nrow(A_sub), "\n")
+  
+  if (nrow(data_subset) < 10) {
+    cat("Insufficient data after matching\n")
+    return(NULL)
+  }
+  
+  # Prepare genomic relationship matrix
+  Ghat.bend <- G.tuneup(G = A_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+  
+  # Verify matching
+  match_result <- ASRgenomics::match.kinship2pheno(
+    K = A_sub, 
+    pheno.data = data_subset, 
+    indiv = "GID"
+  )
+  
+  # Ensure GID is factor
+  data_subset$GID <- factor(data_subset$GID)
+  data_subset$Fam <- factor(data_subset$Fam)
+  
+  # Center trait (important for genomic models)
+  trait_mean <- mean(data_subset[[trait]], na.rm = TRUE)
+  data_subset[[trait]] <- data_subset[[trait]] - trait_mean
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ 1")
+  
+  # Fit model
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + Fam,
+      residual = ~ units,
+      data = data_subset,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 50
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    cat("Warning: Model did not converge\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  cat("\nVariance Components:\n")
+  print(vc)
+  
+  # Extract components
+  
+  Vg <- vc[1, "component"]      # Additive genetic variance
+  Vfam <- vc[2, "component"]    # Family variance
+  Ve <- vc[3, "component"]      # Residual variance
+  
+  # Mean "replication" (usually 1 for MQ traits)
+  rep_counts <- table(data_subset$GID)
+  r <- n_obs/n_geno
+  
+  # Total phenotypic variance
+  Vp <- Vg + Vfam + Ve
+  
+  # Narrow-sense heritability (additive genetic only)
+  h2 <- Vg / (Vg + Vfam + Ve/r)
+  
+  # Broad-sense heritability (genetic + family)
+  H2 <- (Vg + Vfam) / (Vg + Vfam + Ve/r)
+  
+  # Proportion of variance explained
+  prop_Vg <- Vg / Vp
+  prop_Vfam <- Vfam / Vp
+  prop_Ve <- Ve / Vp
+  
+  # Results
+  results <- data.frame(
+    Model = "Single_Env_MQ",
+    Env = env,
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vfam = round(Vfam, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vfam = round(prop_Vfam, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2 = round(h2, 4),
+    H2 = round(H2, 4),
+    n_obs = n_obs,
+    n_geno = n_geno,
+    n_fam = n_fam,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat(sprintf("\n✓ h² (narrow-sense): %.4f\n", h2))
+  cat(sprintf("✓ H² (broad-sense):  %.4f\n", H2))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# MULTI-ENVIRONMENT HERITABILITY FOR MALT QUALITY
+# ==============================================================================
+
+calculate_h2_mq_multi <- function(data, trait, A_matrix) {
+  
+  cat("\n========================================\n")
+  cat("MULTI-ENVIRONMENT MODEL (MQ)\n")
+  cat("Trait:", trait, "\n")
+  cat("========================================\n\n")
+  
+  # Filter data
+  data_clean <- data %>%
+    filter(!is.na(!!sym(trait))) %>%
+    filter(!!sym(trait) > 0) %>%
+    filter(!is.na(Fam), !is.na(GID)) %>%
+    droplevels()
+  
+  n_env <- length(unique(data_clean$Env))
+  n_obs <- nrow(data_clean)
+  n_geno <- length(unique(data_clean$GID))
+  
+  cat("Environments:", n_env, "\n")
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n\n")
+  
+  if (n_env < 2) {
+    cat("Need at least 2 environments\n")
+    return(NULL)
+  }
+  
+  # Match kinship to phenotype
+  indp <- data_clean$GID %in% rownames(A_matrix)
+  data_clean <- data_clean[indp, ]
+  
+  indg <- rownames(A_matrix) %in% data_clean$GID
+  A_sub <- A_matrix[indg, indg]
+  
+  cat("After matching: n =", nrow(data_clean), "\n\n")
+  
+  if (nrow(data_clean) < 20) {
+    cat("Insufficient data after matching\n")
+    return(NULL)
+  }
+  
+  # Prepare genomic matrix
+  Ghat.bend <- G.tuneup(G = A_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+  
+  # Match and arrange
+  ASRgenomics::match.kinship2pheno(K = A_sub, pheno.data = data_clean, indiv = "GID")
+  data_clean <- data_clean %>% arrange(Env)
+  
+  data_clean$GID <- factor(data_clean$GID)
+  data_clean$Fam <- factor(data_clean$Fam)
+  data_clean$Env <- factor(data_clean$Env)
+  
+  # Center trait within each environment
+  data_clean <- data_clean %>%
+    group_by(Env) %>%
+    mutate(!!sym(trait) := !!sym(trait) - mean(!!sym(trait), na.rm = TRUE)) %>%
+    ungroup()
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ Env")
+  
+  # Fit model
+  cat("Fitting multi-environment model...\n")
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + 
+                 GID:Env + 
+                 Fam,
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 100
+    )
+  }, error = function(e) {
+    cat("Full model failed:", e$message, "\n")
+    cat("Trying simplified model...\n")
+    
+    # Simplified model without G×E
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + Fam,
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 100
+    )
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    warning("Model did not converge fully")
+  } else {
+    cat("✓ Model converged\n\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("vm\\(GID", rownames(vc))[1], "component"]
+  
+  Vge_rows <- grep("GID:Env", rownames(vc))
+  Vge <- if(length(Vge_rows) > 0) vc[Vge_rows[1], "component"] else 0
+  
+  Vfam <- vc[grep("^Fam", rownames(vc))[1], "component"]
+  
+  resid_rows <- grep("Env_|units", rownames(vc))
+  Ve <- mean(vc[resid_rows, "component"])
+  
+  # Calculate metrics
+  Vp <- Vg + Vge + Vfam + Ve
+  
+  prop_Vg <- Vg / Vp
+  prop_Vge <- Vge / Vp
+  prop_Vfam <- Vfam / Vp
+  prop_Ve <- Ve / Vp
+  
+  # Mean replication
+  rep_counts <- data_clean %>%
+    group_by(Env, GID) %>%
+    summarise(n = n(), .groups = 'drop')
+  r <- n_obs/n_geno
+  
+  # Narrow-sense heritability
+  h2 <- Vg / (Vg + Vge/n_env + Vfam + Ve/r)
+  
+  # Broad-sense heritability
+  H2 <- (Vg + Vfam) / (Vg + Vge/n_env + Vfam + Ve/r)
+  
+  # Genetic correlation across environments
+  rg_env <- Vg / (Vg + Vge)
+  
+  # Results
+  results <- data.frame(
+    Model = "Multi_Env_MQ",
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vge = round(Vge, 4),
+    Vfam = round(Vfam, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vge = round(prop_Vge, 4),
+    prop_Vfam = round(prop_Vfam, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2 = round(h2, 4),
+    H2 = round(H2, 4),
+    rg_env = round(rg_env, 4),
+    n_env = n_env,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat("\n===== VARIANCE COMPONENTS =====\n")
+  cat(sprintf("Genetic (Vg):         %8.4f  (%5.1f%%)\n", Vg, prop_Vg*100))
+  cat(sprintf("G × Env (Vge):        %8.4f  (%5.1f%%)\n", Vge, prop_Vge*100))
+  cat(sprintf("Family (Vfam):        %8.4f  (%5.1f%%)\n", Vfam, prop_Vfam*100))
+  cat(sprintf("Error (Ve):           %8.4f  (%5.1f%%)\n", Ve, prop_Ve*100))
+  cat(sprintf("\nh² (narrow-sense):    %.4f\n", h2))
+  cat(sprintf("H² (broad-sense):     %.4f\n", H2))
+  cat(sprintf("rg (environments):    %.4f\n", rg_env))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# RUN ANALYSIS FOR ALL MALT QUALITY TRAITS
+# ==============================================================================
+
+# Storage
+all_results_single_mq <- list()
+all_results_multi_mq <- list()
+results_single_mq_df <- data.frame()
+results_multi_mq_df <- data.frame()
+failed_combos <- data.frame()
+
+
+# SINGLE-ENVIRONMENT ANALYSIS
+cat("\n### SINGLE-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  for (env in envs) {
+    
+    cat("\n--- Processing:", trait, "in", env, "---\n")
+    
+    result <- calculate_h2_mq_single(data_mq, env, trait, A1)
+    
+    if (!is.null(result)) {
+      key <- paste(env, trait, sep = "_")
+      all_results_single_mq[[key]] <- result
+      results_single_mq_df <- rbind(results_single_mq_df, result$results)
+    } else {
+      failed_combos <- rbind(failed_combos, data.frame(
+        Env = env,
+        Trait = trait,
+        reason = "Insufficient data or model failure"
+      ))
+    }
+  }
+}
+
+# MULTI-ENVIRONMENT ANALYSIS
+cat("\n\n### MULTI-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  
+  cat("\n--- Processing:", trait, "across all environments ---\n")
+  
+  result <- calculate_h2_mq_multi(data_mq, trait, A1)
+  
+  if (!is.null(result)) {
+    all_results_multi_mq[[trait]] <- result
+    results_multi_mq_df <- rbind(results_multi_mq_df, result$results)
+  }
+}
+
+
+# ==============================================================================
+# SUMMARY STATISTICS
+# ==============================================================================
+
+if (nrow(results_single_mq_df) > 0) {
+  cat("===== SINGLE-ENVIRONMENT SUMMARY =====\n")
+  summary_single_mq <- results_single_mq_df %>%
+    group_by(Trait) %>%
+    summarise(
+      n_env = n(),
+      mean_h2 = round(mean(h2, na.rm = TRUE), 3),
+      sd_h2 = round(sd(h2, na.rm = TRUE), 3),
+      mean_H2 = round(mean(H2, na.rm = TRUE), 3),
+      sd_H2 = round(sd(H2, na.rm = TRUE), 3),
+      min= min(H2,  na.rm = TRUE), 
+      max= max(H2, na.rm = TRUE),
+      ran = max-min,
+      .groups = 'drop' 
+    ) %>% arrange(mean_H2)
+  print(summary_single_mq)
+}
+
+if (nrow(results_multi_mq_df) > 0) {
+  cat("\n===== MULTI-ENVIRONMENT SUMMARY =====\n")
+  print(results_multi_mq_df[,c(2,12,13)] %>%  arrange(H2))
+}
+
+
+
+cat("\n\n### MULTI-ENVIRONMENT MEAN H2 ACROSS MQ TRAITS###\n")
+p<- results_multi_mq_df[,c(2,12,13)] %>% arrange(H2)
+mean(p$H2)
+
+cat("\n\n### SINGLE ENVIRONMENT H2 for  MQ TRAITS###\n")
+q<- results_single_mq_df[,c(2,3,12)] %>% arrange(Trait)
+
+q %>% arrange(Trait,Env)
+```
+
+###**1.1.1.VISUALIZATIONS NQ**
+```{r}
+
+# Plot 1: Variance components (multi-env)
+if (nrow(results_multi_mq_df) > 0) {
+  
+  variance_long <- results_multi_mq_df %>%
+    #select(Trait, prop_Vg, prop_Vge, prop_Vfam, prop_Ve) %>%
+    pivot_longer(cols = starts_with("prop_"), 
+                 names_to = "Component", 
+                 values_to = "Proportion") %>%
+    mutate(Component = recode(Component,
+                             "prop_Vg" = "Additive Genetic",
+                             "prop_Vge" = "G × Env",
+                             "prop_Vfam" = "Family",
+                             "prop_Ve" = "Error"))
+  
+  p2 <- ggplot(variance_long, aes(x = Trait, y = Proportion, fill = Component)) +
+    geom_bar(stat = "identity", position = "stack", color = "black") +
+    scale_fill_brewer(palette = "Set2") +
+    #theme_bw(base_size = 16) +
+    labs(
+      title = "Variance Component Partitioning (Multi-Environment)",
+      subtitle = "Malt Quality Traits",
+      x = "Trait",
+      y = "Proportion of Total Variance"
+    ) +
+    scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size= 16))
+  
+  print(p2)
+
+  
+  # Plot 2: Multi-env heritability
+  herit_multi <- results_multi_mq_df %>%
+    #select(Trait, h2, H2) %>%
+    pivot_longer(cols = c(h2, H2), names_to = "Type", values_to = "Heritability") %>%
+    mutate(Type = recode(Type, "h2" = "h² (narrow)", "H2" = "H² (broad)"))
+  
+  p3 <- ggplot(herit_multi, aes(x = Trait, y = Heritability, fill = Type)) +
+    geom_bar(stat = "identity", position = "dodge", color = "black") +
+    geom_text(aes(label = round(Heritability, 2)), 
+              position = position_dodge(width = 0.9), 
+              vjust = -0.5, size = 3) +
+    scale_fill_manual(values = c("lightblue", "steelblue")) +
+    theme_bw(base_size = 12) +
+    labs(
+      title = "Multi-Environment Heritability",
+      subtitle = "Malt Quality Traits",
+      x = "Trait",
+      y = "Heritability"
+    ) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  print(p3)
+  
+}
+```
+
+
+
+
+### **1.2 Narrow Heritability for agronomic traits**
+```{r}
+# ==============================================================================
+# NARROW-SENSE HERITABILITY ANALYSIS FOR AGRONOMIC TRAITS
+# Using genomic relationship matrix
+# ==============================================================================
+
+data_ag <- data_ag %>%
+  arrange(Env) %>%
+  mutate(
+    GID = factor(GID),
+    Env = factor(Env),
+    Row = factor(Row),
+    Column = factor(Column)
+  )
+
+
+# Define traits and environments
+traits <- colnames(data_ag)[7:9]  # Adjust to your actual trait columns
+envs <- levels(data_ag$Env)
+
+cat("Agronomic Traits:", paste(traits, collapse = ", "), "\n")
+cat("Environments:", paste(envs, collapse = ", "), "\n\n")
+
+# Load genomic relationship matrix
+load("data/geno/WMB_master_geno.RData")  # Contains A1 matrix
+cat("Genomic relationship matrix loaded. Dimension:", dim(A1), "\n\n")
+
+# ==============================================================================
+# SINGLE-ENVIRONMENT NARROW-SENSE HERITABILITY
+# ==============================================================================
+
+calculate_h2_narrow_single <- function(data, env, trait, A_matrix) {
+  
+  cat("\n========================================\n")
+  cat("Environment:", env, "| Trait:", trait, "\n")
+  cat("========================================\n")
+  
+  # Filter data
+  data_subset <- data %>%
+    filter(Env == env) %>%
+    filter(!is.na(!!sym(trait))) %>%
+    droplevels()
+  
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n")
+  
+  if (n_obs < 20 || n_geno < 5) {
+    cat("Insufficient data\n")
+    return(NULL)
+  }
+  
+  # Match kinship to phenotype data
+  indp <- data_subset$GID %in% rownames(A_matrix)
+  data_subset <- data_subset[indp, ]
+  
+  indg <- rownames(A_matrix) %in% data_subset$GID
+  A_sub <- A_matrix[indg, indg]
+  
+  cat("After matching: n =", nrow(data_subset), ", genotypes =", nrow(A_sub), "\n")
+  
+  if (nrow(data_subset) < 20) {
+    cat("Insufficient data after matching\n")
+    return(NULL)
+  }
+  
+  # Prepare genomic relationship matrix
+  Ghat.bend <- G.tuneup(G = A_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+  
+  # Verify matching
+  match_result <- ASRgenomics::match.kinship2pheno(
+    K = A_sub, 
+    pheno.data = data_subset, 
+    indiv = "GID"
+  )
+  
+  # Ensure GID is factor
+  data_subset$GID <- factor(data_subset$GID)
+  data_subset <- data_subset %>% arrange(Row, Column)
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ 1")
+  
+  # Fit model
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + ar1(Row):ar1(Column),
+      residual = ~ units,
+      data = data_subset,
+      trace = FALSE,
+      maxit = 50
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    cat("Warning: Model did not converge\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  cat("\nVariance Components:\n")
+  print(vc)
+  
+  # Extract components
+
+  Vg <- vc[grep("vm\\(GID", rownames(vc))[1], "component"]
+  
+  spatial_rows <- grep("Row.*Column|ar1", rownames(vc))
+  Vrc <- if(length(spatial_rows) > 0) mean(vc[spatial_rows, "component"]) else 0
+  
+  Ve <- vc[grep("units|residual|R!", rownames(vc))[1], "component"]
+  
+  # Calculate mean replication
+  rep_counts <- table(data_subset$GID)
+  r <- n_obs/n_geno
+  
+  # Total phenotypic variance
+  Vp <- Vg + Vrc + Ve
+  
+  # Narrow-sense heritability (plot basis)
+  h2_plot <- Vg / Vp
+  
+  # Narrow-sense heritability (entry-mean basis)
+  h2_mean <- Vg / (Vg + Vrc/r + Ve/r)
+  
+  # Proportion of variance explained
+  prop_Vg <- Vg / Vp
+  prop_Vrc <- Vrc / Vp
+  prop_Ve <- Ve / Vp
+  
+  # Accuracy of selection
+  accuracy <- sqrt(h2_mean)
+  
+  # Results
+  results <- data.frame(
+    Model = "Narrow_Sense_Single",
+    Env = env,
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vrc = round(Vrc, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vrc = round(prop_Vrc, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    accuracy = round(accuracy, 4),
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat(sprintf("\n✓ h² (narrow-sense, plot):     %.4f\n", h2_plot))
+  cat(sprintf("✓ h² (narrow-sense, mean):     %.4f\n", h2_mean))
+  cat(sprintf("✓ Accuracy of selection:       %.4f\n", accuracy))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# MULTI-ENVIRONMENT NARROW-SENSE HERITABILITY
+# ==============================================================================
+
+calculate_h2_narrow_multi <- function(data, trait, A_matrix) {
+  
+  cat("\n========================================\n")
+  cat("MULTI-ENVIRONMENT MODEL (Narrow-Sense)\n")
+  cat("Trait:", trait, "\n")
+  cat("========================================\n\n")
+  
+  # Filter data
+  data_clean <- data %>%
+    filter(!is.na(!!sym(trait))) %>%
+    droplevels()
+  
+  n_env <- length(unique(data_clean$Env))
+  n_obs <- nrow(data_clean)
+  n_geno <- length(unique(data_clean$GID))
+  
+  cat("Environments:", n_env, "\n")
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n\n")
+  
+  if (n_env < 2) {
+    cat("Need at least 2 environments\n")
+    return(NULL)
+  }
+  
+  # Match kinship to phenotype
+  indp <- data_clean$GID %in% rownames(A_matrix)
+  data_clean <- data_clean[indp, ]
+  
+  indg <- rownames(A_matrix) %in% data_clean$GID
+  A_sub <- A_matrix[indg, indg]
+  
+  cat("After matching: n =", nrow(data_clean), "\n\n")
+  
+  if (nrow(data_clean) < 30) {
+    cat("Insufficient data after matching\n")
+    return(NULL)
+  }
+  
+  # Prepare genomic matrix
+  Ghat.bend <- G.tuneup(G = A_sub, bend = TRUE, eig.tol = 1e-03)$Gb
+  Ginv.sparse <- G.inverse(G = Ghat.bend, sparse = TRUE)$Ginv
+  
+  # Match and arrange
+  ASRgenomics::match.kinship2pheno(K = A_sub, pheno.data = data_clean, indiv = "GID")
+  data_clean <- data_clean %>% arrange(Env, Row, Column)
+  
+  data_clean$GID <- factor(data_clean$GID)
+  data_clean$Env <- factor(data_clean$Env)
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ Env")
+  
+  # Fit model
+  cat("Fitting multi-environment model...\n")
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + 
+                 GID:Env + 
+                 at(Env):ar1(Row):ar1(Column),
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      trace = FALSE,
+      maxit = 100
+    )
+  }, error = function(e) {
+    cat("Full model failed:", e$message, "\n")
+    cat("Trying simplified model...\n")
+    
+    # Simplified model without G×E
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ vm(GID, Ginv.sparse) + 
+                 at(Env):ar1(Row):ar1(Column),
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      trace = FALSE,
+      maxit = 100
+    )
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    warning("Model did not converge fully")
+  } else {
+    cat("✓ Model converged\n\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("vm\\(GID", rownames(vc))[1], "component"]
+  
+  Vge_rows <- grep("GID:Env", rownames(vc))
+  Vge <- if(length(Vge_rows) > 0) vc[Vge_rows[1], "component"] else 0
+  
+  spatial_rows <- grep("Row.*Column|ar1.*ar1", rownames(vc))
+  Vspatial <- if(length(spatial_rows) > 0) mean(vc[spatial_rows, "component"]) else 0
+  
+  resid_rows <- grep("Env_|units", rownames(vc))
+  Ve <- mean(vc[resid_rows, "component"])
+  
+  # Calculate metrics
+  Vp <- Vg + Vge + Vspatial + Ve
+  
+  prop_Vg <- Vg / Vp
+  prop_Vge <- Vge / Vp
+  prop_Vspatial <- Vspatial / Vp
+  prop_Ve <- Ve / Vp
+  
+  # Plot basis
+  h2_plot <- Vg / Vp
+  
+  # Mean replication
+  rep_counts <- data_clean %>%
+    group_by(Env, GID) %>%
+    summarise(n = n(), .groups = 'drop')
+  r <- n_obs/n_geno
+  
+  # Entry-mean basis (narrow-sense heritability)
+  h2_mean <- Vg / (Vg + Vge/n_env + Vspatial/r + Ve/r)
+  
+  # Genetic correlation across environments (stability)
+  rg_env <- Vg / (Vg + Vge)
+  
+  # Accuracy
+  accuracy <- sqrt(h2_mean)
+  
+  # Results
+  results <- data.frame(
+    Model = "Narrow_Sense_Multi",
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vge = round(Vge, 4),
+    Vspatial = round(Vspatial, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vge = round(prop_Vge, 4),
+    prop_Vspatial = round(prop_Vspatial, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    rg_env = round(rg_env, 4),
+    accuracy = round(accuracy, 4),
+    n_env = n_env,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat("\n===== VARIANCE COMPONENTS =====\n")
+  cat(sprintf("Additive Genetic (Vg):    %8.4f  (%5.1f%%)\n", Vg, prop_Vg*100))
+  cat(sprintf("G × Env (Vge):            %8.4f  (%5.1f%%)\n", Vge, prop_Vge*100))
+  cat(sprintf("Spatial:                  %8.4f  (%5.1f%%)\n", Vspatial, prop_Vspatial*100))
+  cat(sprintf("Error (Ve):               %8.4f  (%5.1f%%)\n", Ve, prop_Ve*100))
+  cat(sprintf("\nh² (narrow-sense, mean):  %.4f\n", h2_mean))
+  cat(sprintf("Accuracy:                 %.4f\n", accuracy))
+  cat(sprintf("rg (environments):        %.4f\n", rg_env))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# RUN ANALYSIS FOR ALL AGRONOMIC TRAITS
+# ==============================================================================
+
+# Storage
+all_results_single_narrow <- list()
+all_results_multi_narrow <- list()
+results_single_narrow_df <- data.frame()
+results_multi_narrow_df <- data.frame()
+failed_combos <- data.frame()
+
+
+# SINGLE-ENVIRONMENT ANALYSIS
+cat("\n### SINGLE-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  for (env in envs) {
+    
+    cat("\n--- Processing:", trait, "in", env, "---\n")
+    
+    result <- calculate_h2_narrow_single(data_ag, env, trait, A1)
+    
+    if (!is.null(result)) {
+      key <- paste(env, trait, sep = "_")
+      all_results_single_narrow[[key]] <- result
+      results_single_narrow_df <- rbind(results_single_narrow_df, result$results)
+    } else {
+      failed_combos <- rbind(failed_combos, data.frame(
+        Env = env,
+        Trait = trait,
+        reason = "Insufficient data or model failure"
+      ))
+    }
+  }
+}
+
+# MULTI-ENVIRONMENT ANALYSIS
+cat("\n\n### MULTI-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  
+  cat("\n--- Processing:", trait, "across all environments ---\n")
+  
+  result <- calculate_h2_narrow_multi(data_ag, trait, A1)
+  
+  if (!is.null(result)) {
+    all_results_multi_narrow[[trait]] <- result
+    results_multi_narrow_df <- rbind(results_multi_narrow_df, result$results)
+  }
+}
+
+# ==============================================================================
+# SUMMARY STATISTICS
+# ==============================================================================
+
+if (nrow(results_single_narrow_df) > 0) {
+  cat("===== SINGLE-ENVIRONMENT SUMMARY =====\n")
+  summary_single <- results_single_narrow_df %>%
+    group_by(Trait) %>%
+    summarise(
+      n_env = n(),
+      mean_h2 = round(mean(h2_mean, na.rm = TRUE), 3),
+      sd_h2 = round(sd(h2_mean, na.rm = TRUE), 3),
+      min_h2 = round(min(h2_mean, na.rm = TRUE), 3),
+      max_h2 = round(max(h2_mean, na.rm = TRUE), 3),
+      mean_accuracy = round(mean(accuracy, na.rm = TRUE), 3),
+      .groups = 'drop'
+    )
+  print(summary_single)
+}
+
+if (nrow(results_multi_narrow_df) > 0) {
+  cat("\n===== MULTI-ENVIRONMENT SUMMARY =====\n")
+  print(results_multi_narrow_df) 
+}
+```
+
+
+###**1.2.1.VISUALIZATIONS AG**
+```{r}
+# ==============================================================================
+# VISUALIZATIONS
+# ==============================================================================
+
+# Plot 1: Multi-environment variance components
+if (nrow(results_multi_narrow_df) > 0) {
+  
+  variance_long <- results_multi_narrow_df %>%
+    #select(Trait, prop_Vg, prop_Vge, prop_Vspatial, prop_Ve) %>%
+    pivot_longer(cols = starts_with("prop_"), 
+                 names_to = "Component", 
+                 values_to = "Proportion") %>%
+    mutate(Component = recode(Component,
+                             "prop_Vg" = "Additive Genetic",
+                             "prop_Vge" = "G × Env",
+                             "prop_Vspatial" = "Spatial",
+                             "prop_Ve" = "Error"))
+  
+  p3 <- ggplot(variance_long, aes(x = Trait, y = Proportion, fill = Component)) +
+    geom_bar(stat = "identity", position = "stack", color = "black") +
+    scale_fill_brewer(palette = "Set2") +
+    #theme_bw(base_size = 16) +
+    labs(
+      title = "Variance Component Partitioning (Narrow-Sense)",
+      subtitle = "Multi-environment analysis",
+      x = "Trait",
+      y = "Proportion of Total Variance"
+    ) +
+    scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, size= 16))
+  
+  print(p3)
+  }
+```
+
+
+
+### **1.3 Broad Heritability for agronomic traits**
+```{r}
+# ==============================================================================
+# HERITABILITY ANALYSIS FOR AGRONOMIC TRAITS
+# Multi-environment analysis with spatial adjustment
+# ==============================================================================
+
+traits <- colnames(data_ag)[7:9]
+envs <- levels(data_ag$Env)
+
+cat("Traits to analyze:", paste(traits, collapse = ", "), "\n")
+cat("Environments:", paste(envs, collapse = ", "), "\n\n")
+
+# ==============================================================================
+# MODEL 1: SINGLE-ENVIRONMENT HERITABILITY (Per Environment)
+# ==============================================================================
+
+calculate_H2_single_env <- function(data, env, trait) {
+  
+  cat("\n========================================\n")
+  cat("Environment:", env, "| Trait:", trait, "\n")
+  cat("========================================\n")
+  
+  # Filter data for this environment
+  data_subset <- data %>%
+    filter(Env == env) %>%
+    filter(!is.na(!!sym(trait))) %>%
+    arrange(Row, Column)
+  
+  # Check data quality
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  
+  if (n_obs < 20 || n_geno < 5) {
+    cat("Insufficient data (n =", n_obs, ", genotypes =", n_geno, ")\n")
+    return(NULL)
+  }
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ 1")
+  
+  # Fit model
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + ar1(Row):ar1(Column),
+      residual = ~ idv(units),
+      data = data_subset,
+      trace = FALSE,
+      maxit = 50
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    cat("Warning: Model did not converge\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("^GID", rownames(vc))[1], "component"]
+  Vrc_rows <- grep("Row.*Column", rownames(vc))
+  Vrc <- if(length(Vrc_rows) > 0) vc[Vrc_rows[1], "component"] else 0
+  Ve <- vc[grep("units|residual|R!", rownames(vc))[1], "component"]
+  
+  # Calculate mean replication
+  rep_counts <- table(data_subset$GID)
+  r <- n_obs/n_geno
+  
+  # Calculate heritability
+  Vp <- Vg + Vrc + Ve
+  h2_plot <- Vg / Vp
+  h2_mean <- Vg / (Vg + Vrc/r + Ve/r)
+  
+  
+  # Results
+  results <- data.frame(
+    Model = "Single_Env",
+    Env = env,
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vrc = round(Vrc, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat(sprintf("\n✓ h² (mean basis): %.4f\n", h2_mean))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# MODEL 2: MULTI-ENVIRONMENT HERITABILITY (Across All Environments)
+# ==============================================================================
+calculate_H2_multi_env <- function(data, trait, envs_ws = NULL) {
+  
+  cat("\n========================================\n")
+  cat("MULTI-ENVIRONMENT MODEL\n")
+  cat("Trait:", trait, "\n")
+  cat("========================================\n\n")
+  
+  # Filter for winter survival environments if applicable
+  if (trait == "winter_survival" && !is.null(envs_ws)) {
+    cat("Filtering for Winter Survival environments:", paste(envs_ws, collapse = ", "), "\n\n")
+    data <- data %>%
+      filter(Env %in% envs_ws)
+  }
+  
+  # Prepare data
+  data_clean <- data %>%
+    filter(!is.na(!!sym(trait))) %>%
+    arrange(Env, Row, Column)
+  
+  n_env <- length(unique(data_clean$Env))
+  n_obs <- nrow(data_clean)
+  n_geno <- length(unique(data_clean$GID))
+  
+  cat("Environments:", n_env, "\n")
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n\n")
+  
+  if (n_env < 2) {
+    cat("Need at least 2 environments for multi-env model\n")
+    return(NULL)
+  }
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ Env")
+  
+  # Fit model
+  cat("Fitting multi-environment model...\n")
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + GID:Env + at(Env):ar1(Row):ar1(Column),
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      trace = FALSE,
+      maxit = 100
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    warning("Model did not converge fully")
+  } else {
+    cat("✓ Model converged\n\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("^GID$|^GID\\!GID", rownames(vc))[1], "component"]
+  
+  Vge_rows <- grep("GID:Env$|GID:Env\\!", rownames(vc))
+  Vge <- if(length(Vge_rows) > 0) vc[Vge_rows[1], "component"] else 0
+  
+  spatial_rows <- grep("Row.*Column|ar1.*ar1", rownames(vc))
+  Vspatial <- if(length(spatial_rows) > 0) mean(vc[spatial_rows, "component"]) else 0
+  
+  resid_rows <- grep("Env_|units", rownames(vc))
+  Ve <- mean(vc[resid_rows, "component"])
+  
+  # Calculate metrics
+  Vp <- Vg + Vge + Vspatial + Ve
+  
+  prop_G <- Vg / Vp
+  prop_GE <- Vge / Vp
+  prop_spatial <- Vspatial / Vp
+  prop_error <- Ve / Vp
+  
+  h2_plot <- Vg / Vp
+  
+  # Mean replication
+  rep_counts <- data_clean %>%
+    group_by(Env, GID) %>%
+    summarise(n = n(), .groups = 'drop')
+  r <- n_obs/n_geno
+  
+  
+  # Entry-mean heritability
+  h2_mean <- Vg / (Vg + Vge/n_env + Vspatial/r + Ve/r)
+  
+  # Genetic correlation across environments (stability)
+  rg_env <- Vg / (Vg + Vge)
+  
+  # Results
+  results <- data.frame(
+    Model = "Multi_Env",
+    Trait = trait,
+    Vg = round(Vg, 4),
+    Vge = round(Vge, 4),
+    Vspatial = round(Vspatial, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_G = round(prop_G, 4),
+    prop_GE = round(prop_GE, 4),
+    prop_spatial = round(prop_spatial, 4),
+    prop_error = round(prop_error, 4),
+    H2_plot = round(h2_plot, 4),
+    H2_mean = round(h2_mean, 4),
+    rg_env = round(rg_env, 4),
+    n_env = n_env,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat("\n===== VARIANCE COMPONENTS =====\n")
+  cat(sprintf("Genetic (Vg):         %8.4f  (%5.1f%%)\n", Vg, prop_G*100))
+  cat(sprintf("G × Env (Vge):        %8.4f  (%5.1f%%)\n", Vge, prop_GE*100))
+  cat(sprintf("Spatial:              %8.4f  (%5.1f%%)\n", Vspatial, prop_spatial*100))
+  cat(sprintf("Error:                %8.4f  (%5.1f%%)\n", Ve, prop_error*100))
+  cat(sprintf("\nHeritability (mean):  %.4f\n", h2_mean))
+  cat(sprintf("rg (environments):    %.4f\n", rg_env))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+# ==============================================================================
+# RUN ANALYSIS FOR ALL TRAITS
+# ==============================================================================
+
+# Storage for results
+all_results_single <- list()
+all_results_multi <- list()
+results_single_df <- data.frame()
+results_multi_df <- data.frame()
+
+
+# SINGLE-ENVIRONMENT ANALYSIS
+cat("\n### SINGLE-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  for (env in envs) {
+    
+    cat("\n--- Processing:", trait, "in", env, "---\n")
+    
+    result <- calculate_H2_single_env(data_ag, env, trait)
+    
+    if (!is.null(result)) {
+      key <- paste(env, trait, sep = "_")
+      all_results_single[[key]] <- result
+      results_single_df <- rbind(results_single_df, result$results)
+    }
+  }
+}
+
+envs_ws <- c("MCG25", "MCG23", "SNY22")
+# MULTI-ENVIRONMENT ANALYSIS
+cat("\n\n### MULTI-ENVIRONMENT ANALYSIS ###\n")
+for (trait in traits) {
+  
+  cat("\n--- Processing:", trait, "across all environments ---\n")
+  
+  result <- calculate_H2_multi_env(data_ag, trait, envs_ws)
+  
+  if (!is.null(result)) {
+    all_results_multi[[trait]] <- result
+    results_multi_df <- rbind(results_multi_df, result$results)
+  }
+}
+
+# ==============================================================================
+# SUMMARY STATISTICS
+# ==============================================================================
+
+# Single-environment summary
+if (nrow(results_single_df) > 0) {
+  cat("===== SINGLE-ENVIRONMENT SUMMARY =====\n")
+  summary_single <- results_single_df %>%
+    group_by(Trait) %>%
+    summarise(
+      n_env = n(),
+      mean_h2 = round(mean(h2_mean, na.rm = TRUE), 3),
+      sd_h2 = round(sd(h2_mean, na.rm = TRUE), 3),
+      min_h2 = round(min(h2_mean, na.rm = TRUE), 3),
+      max_h2 = round(max(h2_mean, na.rm = TRUE), 3),
+      .groups = 'drop'
+    )
+  print(summary_single)
+}
+
+# Multi-environment summary
+if (nrow(results_multi_df) > 0) {
+  cat("\n===== MULTI-ENVIRONMENT SUMMARY =====\n")
+  print(results_multi_df)
+}
+```
+
+
+###**1.3.2.VISUALIZATIONS AG**
+
+```{r}
+# ==============================================================================
+# VISUALIZATIONS
+# ==============================================================================
+
+# Plot 1: Single-environment heritability by trait and environment
+if (nrow(results_single_df) > 0) {
+  
+  p1 <- ggplot(results_single_df, aes(x = Trait, y = h2_mean, fill = Env)) +
+    geom_bar(stat = "identity", position = "dodge", color = "black") +
+    geom_text(aes(label = round(h2_mean, 2)), 
+              position = position_dodge(width = 0.9), 
+              vjust = -0.5, size = 3) +
+    theme_bw(base_size = 12) +
+    labs(
+      title = "Single-Environment Heritability by Trait",
+      x = "Environment",
+      y = "Entry-mean Heritability (h²)",
+      fill = "Trait"
+    ) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  print(p1)
+}
+
+# Plot 2: Multi-environment variance components
+if (nrow(results_multi_df) > 0) {
+  
+  variance_long <- results_multi_df %>%
+    #select(Trait, prop_G, prop_GE, prop_spatial, prop_error) %>%
+    pivot_longer(cols = starts_with("prop_"), 
+                 names_to = "Component", 
+                 values_to = "Proportion") %>%
+    mutate(Component = recode(Component,
+                             "prop_G" = "Genetic",
+                             "prop_GE" = "G × Env",
+                             "prop_spatial" = "Spatial",
+                             "prop_error" = "Error"))
+  
+  p2 <- ggplot(variance_long, aes(x = Trait, y = Proportion, fill = Component)) +
+    geom_bar(stat = "identity", position = "stack", color = "black") +
+    scale_fill_brewer(palette = "Set3") +
+    theme_bw(base_size = 16) +
+    labs(
+      title = "Variance Component Partitioning (Multi-Environment)",
+      x = "Trait",
+      y = "Proportion of Total Variance"
+    ) +
+    scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  print(p2)
+  }
+```
+
+
+
+### **1.4.Heritability for VIs traits**
+```{r}
+# ==============================================================================
+# HERITABILITY ANALYSIS FOR VEGETATIVE INDICES
+# Analysis with spatial adjustment
+# ==============================================================================
+
+data<- merge(data_sp, data_ag[,c(1,5,6)], by= "plot_id")
+colnames(data)[4]<- "timepoint"
+
+# ==============================================================================
+# MODEL 1: THROUGH ALL VALID VI:ENV COMBINATIONS
+# ==============================================================================
+
+model_1_single <- function(data, env, timepoint, vi) {
+  
+  cat("\n========================================\n")
+  cat("MODEL 1: Single Env-Timepoint\n")
+  cat("Env:", env, "| Timepoint:", timepoint, "| VI:", vi, "\n")
+  cat("========================================\n\n")
+  
+  # Filter and prepare data
+  data_subset <- data %>%
+    filter(Env == env, timepoint == !!timepoint) %>%  # FIXED: Added timepoint filter
+    filter(!is.na(!!sym(vi))) %>%
+    mutate(
+      GID = factor(GID),
+      Row = factor(Row),
+      Column = factor(Column),
+      plot_id = factor(plot_id)
+    ) %>%
+    arrange(Row, Column)  # Sort for spatial model
+  
+  # Check data
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  
+  if (n_obs < 20 || n_geno < 5) {
+    cat("Insufficient data (n_obs =", n_obs, ", n_geno =", n_geno, ")\n")
+    return(NULL)
+  }
+  
+  # Build formula
+  formula_str <- paste0(vi, " ~ 1")
+  
+  # Fit model
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + ar1(Row):ar1(Column),
+      residual = ~ idv(units),
+      data = data_subset,
+      trace = FALSE,
+      maxit = 50
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    cat("Warning: Model did not converge\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  cat("\nVariance Components:\n")
+  print(vc)
+  
+  Vg <- vc[grep("^GID", rownames(vc))[1], "component"]
+  Vrc_rows <- grep("Row.*Column", rownames(vc))
+  Vrc <- if(length(Vrc_rows) > 0) vc[Vrc_rows[1], "component"] else 0
+  Ve <- vc[grep("units|residual|R!", rownames(vc))[1], "component"]
+  
+  # Calculate heritability
+  rep_counts <- table(data_subset$GID)
+  r <- n_obs/n_geno
+  
+  Vp <- Vg + Vrc + Ve
+  h2_plot <- Vg / Vp
+  h2_mean <- Vg / (Vg + Vrc/r + Ve/r)
+  
+  
+  results <- data.frame(
+    Model = "Model_1_Single",
+    Env = env,
+    Timepoint = timepoint,
+    VI = vi,
+    Vg = round(Vg, 6),
+    Vrc = round(Vrc, 6),
+    Ve = round(Ve, 6),
+    Vp = round(Vp, 6),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat(sprintf("\n✓ h² (plot): %.4f | h² (mean): %.4f", 
+              h2_plot, h2_mean))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# WRAPPER FUNCTION: RUN MODEL 1 FOR ALL VALID COMBINATIONS
+# ==============================================================================
+
+run_model1_all_combinations <- function(data, vis = c("NDVI", "PSRI")) {
+  
+  cat("\n================================================================================\n")
+  cat("RUNNING MODEL 1 FOR ALL VALID ENV-TIMEPOINT-VI COMBINATIONS\n")
+  cat("================================================================================\n")
+  
+  # Discover all valid combinations
+  data_combos <- data %>%
+    #select(Env, timepoint) %>%
+    pivot_longer(cols = all_of(vis), names_to = "VI", values_to = "value") %>%
+    filter(!is.na(value)) %>%
+    distinct(Env, timepoint, VI) %>%
+    arrange(Env, VI, timepoint)
+  
+  cat("\nTotal valid combinations found:", nrow(data_combos), "\n")
+  cat("\nBreakdown by Environment:\n")
+  
+  # Show summary
+  summary_table <- data_combos %>%
+    group_by(Env, VI) %>%
+    summarise(
+      n_timepoints = n(),
+      timepoints = paste(sort(unique(timepoint)), collapse = ", "),
+      .groups = 'drop'
+    )
+  print(summary_table)
+  
+  # Initialize storage
+  all_results <- list()
+  results_df <- data.frame()
+  failed_combos <- data.frame()
+  
+  # Loop through all valid combinations
+  for (i in 1:nrow(data_combos)) {
+    
+    env <- as.character(data_combos$Env[i])
+    tp <- data_combos$timepoint[i]
+    vi <- data_combos$VI[i]
+    
+    cat("\n[", i, "/", nrow(data_combos), "] Processing:", 
+        env, "- Timepoint", tp, "-", vi, "\n")
+    
+    # Run model
+    result <- model_1_single(data, env, tp, vi)
+    
+    if (!is.null(result)) {
+      # Store successful result
+      key <- paste(env, tp, vi, sep = "_")
+      all_results[[key]] <- result
+      results_df <- rbind(results_df, result$results)
+    } else {
+      # Track failed combination
+      failed_combos <- rbind(failed_combos, data.frame(
+        Env = env,
+        Timepoint = tp,
+        VI = vi,
+        reason = "Model failed or insufficient data"
+      ))
+    }
+  }
+  
+  # Summary statistics
+  cat("\n\n================================================================================\n")
+  cat("MODEL 1 ANALYSIS COMPLETE\n")
+  cat("================================================================================\n")
+  cat("Successful models:", nrow(results_df), "/", nrow(data_combos), "\n")
+  cat("Failed models:", nrow(failed_combos), "\n")
+  
+  if (nrow(failed_combos) > 0) {
+    cat("\nFailed combinations:\n")
+    print(failed_combos)
+  }
+
+  # Summary by VI
+  if (nrow(results_df) > 0) {
+    cat("\n===== SUMMARY BY VEGETATION INDEX =====\n")
+    summary_vi <- results_df %>% filter(converged == "TRUE") %>%
+      group_by(VI) %>%
+      summarise(
+        n_models = n(),
+        mean_h2_mean = round(mean(h2_mean, na.rm = TRUE), 3),
+        sd_h2_mean = round(sd(h2_mean, na.rm = TRUE), 3),
+        min_h2 = round(min(h2_mean, na.rm = TRUE), 3),
+        max_h2 = round(max(h2_mean, na.rm = TRUE), 3),
+        .groups = 'drop'
+      )
+    
+    # Summary by Environment
+    cat("\n===== SUMMARY BY ENVIRONMENT =====\n")
+    summary_env <- results_df %>% filter(converged == "TRUE") %>%
+      group_by(Env) %>%
+      summarise(
+        n_models = n(),
+        n_VIs = length(unique(VI)),
+        n_timepoints = length(unique(Timepoint)),
+        mean_h2 = round(mean(h2_mean, na.rm = TRUE), 3),
+        sd_h2 = round(sd(h2_mean, na.rm = TRUE), 3),
+        .groups = 'drop'
+      )
+    
+    # Detailed table by Env x VI
+    cat("\n===== HERITABILITY BY ENV × VI × TIMEPOINT =====\n")
+    detail_table <- results_df %>% filter(converged == "TRUE") %>%
+      #select(Env, VI, Timepoint, h2_mean, n_geno) %>%
+      arrange(Env, VI, Timepoint)
+    print(detail_table)
+    
+    # Create pivot table
+    h2_pivot <- results_df %>% filter(converged == "TRUE") %>%
+      #select(Env, VI, Timepoint, h2_mean) %>%
+      pivot_wider(
+        names_from = Timepoint,
+        values_from = h2_mean,
+        names_prefix = "T"
+      )
+    
+  }
+  
+  return(list(
+    models = all_results,
+    results = results_df,
+    failed = failed_combos,
+    summary_vi = if(nrow(results_df) > 0) summary_vi else NULL,
+    summary_env = if(nrow(results_df) > 0) summary_env else NULL
+  ))
+}
+
+# ==============================================================================
+#USAGE
+# ==============================================================================
+
+# Run Model 1 for all valid combinations
+vis <- c("NDVI", "PSRI")
+model1_results <- run_model1_all_combinations(data, vis)
+model1_results$summary_vi
+model1_results$summary_env
+summary(model1_results$results$h2_mean)
+model1_results$results[,c(2,3,4,9,10)] %>% arrange(Env, Timepoint)
+```
+
+
+
+
+### **1.5.Heritability for the PC-s**
+```{r, eval=TRUE}
+# ==============================================================================
+# HERITABILITY ANALYSIS FOR PRINCIPAL COMPONENT TRAITS
+# FPCA and PCA scores from temporal vegetation index data
+# ==============================================================================
+load("data/F_PCA_scoresG.Rdata")
+
+#F_PC_scores<- merge(PCA_scores_df, FPCA_scores_df, by= c("Env","VI", "plot_id"))
+F_PC_scores<- FPCA_scores_df
+colnames(F_PC_scores)
+
+#F_PC_scores<- F_PC_scores[,c(1:6,13:15)]
+F_PC_wide <- F_PC_scores %>%
+  pivot_longer(
+    cols = contains("PC"),
+    names_to = "Component",
+    values_to = "Loadings"
+  ) %>%
+  unite("VI_Component", VI, Component, sep = "_") %>%
+  pivot_wider(
+    names_from = VI_Component,
+    values_from = Loadings
+  )
+
+df_ag <- merge(data_ag[,1:6], F_PC_wide, by= c("plot_id", "Env"))
+df_ag<- df_ag %>% arrange(Env)
+
+
+
+# Prepare PC data
+data_pc <- df_ag %>%
+  mutate(
+    GID = factor(GID),
+    Env = factor(Env),
+    Row = factor(Row),
+    Column = factor(Column)
+  )
+
+# Define PC traits
+#traits_fpca <- colnames(F_PC_wide)[c(33:35, 45:47)]
+#traits_pca <- colnames(F_PC_wide)[c(36:38,48:50)]
+#traits <- c(traits_fpca, traits_pca)
+traits <- colnames(F_PC_wide)[c(3:5,27:29)]
+
+envs <- unique(data_pc$Env)
+
+# ==============================================================================
+# SINGLE-ENVIRONMENT HERITABILITY FOR PC TRAITS
+# ==============================================================================
+calculate_h2_pc_single <- function(data, env, trait) {
+  
+  # Filter data
+  data_subset <- data %>%
+    filter(Env == env) %>%
+    filter(!is.na(!!sym(trait))) %>%
+    mutate(
+      GID = factor(GID),
+      Row = factor(Row),
+      Column = factor(Column)
+    ) %>%
+    arrange(Row, Column)
+  
+  n_obs <- nrow(data_subset)
+  n_geno <- length(unique(data_subset$GID))
+  
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n")
+  
+  if (n_obs < 20 || n_geno < 5) {
+    cat("Insufficient data\n")
+    return(NULL)
+  }
+  
+  # Center trait (important for PC scores)
+  trait_mean <- mean(data_subset[[trait]], na.rm = TRUE)
+  data_subset[[trait]] <- data_subset[[trait]] - trait_mean
+  
+  cat("Trait centered (mean was", round(trait_mean, 4), ")\n")
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ 1")
+  
+  # Fit model
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + ar1(Row):ar1(Column),
+      residual = ~ units,
+      data = data_subset,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 50
+    )
+  }, error = function(e) {
+    cat("Model error:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    cat("Warning: Model did not converge\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  cat("\nVariance Components:\n")
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("^GID", rownames(vc))[1], "component"]
+  
+  Vrc_rows <- grep("Row.*Column|ar1", rownames(vc))
+  Vrc <- if(length(Vrc_rows) > 0) mean(vc[Vrc_rows, "component"]) else 0
+  
+  Ve <- vc[grep("units|residual|R!", rownames(vc))[1], "component"]
+  
+  # Calculate mean replication
+  rep_counts <- table(data_subset$GID)
+  r <- n_obs/n_geno
+  
+  # Total phenotypic variance
+  Vp <- Vg + Vrc + Ve
+  
+  # Heritability
+  h2_plot <- Vg / Vp
+  h2_mean <- Vg / (Vg + Vrc/r + Ve/r)
+  
+
+  
+  # Proportion of variance
+  prop_Vg <- Vg / Vp
+  prop_Vrc <- Vrc / Vp
+  prop_Ve <- Ve / Vp
+  
+  # Determine PC type
+  pc_type <- ifelse(grepl("FPCA|FPC", trait, ignore.case = TRUE), "FPCA", "PCA")
+  pc_number <- as.numeric(gsub(".*PC(\\d+).*", "\\1", trait))
+  
+  # Results
+  results <- data.frame(
+    Model = "Single_Env_PC",
+    Env = env,
+    Trait = trait,
+    PC_Type = pc_type,
+    PC_Number = pc_number,
+    Vg = round(Vg, 6),
+    Vrc = round(Vrc, 6),
+    Ve = round(Ve, 6),
+    Vp = round(Vp, 6),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vrc = round(prop_Vrc, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  cat(sprintf("\n✓ h² (mean basis): %.4f\n", h2_mean))
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# MULTI-ENVIRONMENT HERITABILITY FOR PC TRAITS
+# ==============================================================================
+calculate_h2_pc_multi <- function(data, trait) {
+
+  # Filter data
+  data_clean <- data %>%
+    filter(!is.na(!!sym(trait))) %>%
+    mutate(
+      GID = factor(GID),
+      Env = factor(Env),
+      Row = factor(Row),
+      Column = factor(Column)
+    ) %>%
+    arrange(Env, Row, Column)
+  
+  n_env <- length(unique(data_clean$Env))
+  n_obs <- nrow(data_clean)
+  n_geno <- length(unique(data_clean$GID))
+  
+  cat("Environments:", n_env, "\n")
+  cat("Observations:", n_obs, "\n")
+  cat("Genotypes:", n_geno, "\n\n")
+  
+  if (n_env < 2) {
+    cat("Need at least 2 environments\n")
+    return(NULL)
+  }
+  
+  # Center trait within each environment
+  data_clean <- data_clean %>%
+    group_by(Env) %>%
+    mutate(!!sym(trait) := !!sym(trait) - mean(!!sym(trait), na.rm = TRUE)) %>%
+    ungroup()
+  
+  # Build formula
+  formula_str <- paste0(trait, " ~ Env")
+  
+  # Fit model
+  cat("Fitting multi-environment model...\n")
+  mod <- tryCatch({
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + GID:Env + at(Env):ar1(Row):ar1(Column),
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 100
+    )
+  }, error = function(e) {
+    cat("Full model failed:", e$message, "\n")
+    cat("Trying simplified model...\n")
+    
+    asreml(
+      fixed = as.formula(formula_str),
+      random = ~ GID + at(Env):ar1(Row):ar1(Column),
+      residual = ~ dsum(~ idv(units) | Env),
+      data = data_clean,
+      ai.sing = TRUE,
+      trace = FALSE,
+      maxit = 100
+    )
+  })
+  
+  if (is.null(mod)) {
+    return(NULL)
+  }
+  
+  if (!mod$converge) {
+    warning("Model did not converge fully")
+  } else {
+    cat("✓ Model converged\n\n")
+  }
+  
+  # Extract variance components
+  vc <- summary(mod)$varcomp
+  print(vc)
+  
+  # Extract components
+  Vg <- vc[grep("^GID$|^GID\\!GID", rownames(vc))[1], "component"]
+  
+  Vge_rows <- grep("GID:Env", rownames(vc))
+  Vge <- if(length(Vge_rows) > 0) vc[Vge_rows[1], "component"] else 0
+  
+  spatial_rows <- grep("Row.*Column|ar1.*ar1", rownames(vc))
+  Vspatial <- if(length(spatial_rows) > 0) mean(vc[spatial_rows, "component"]) else 0
+  
+  resid_rows <- grep("Env_|units", rownames(vc))
+  Ve <- mean(vc[resid_rows, "component"])
+  
+  # Calculate metrics
+  Vp <- Vg + Vge + Vspatial + Ve
+  
+  prop_Vg <- Vg / Vp
+  prop_Vge <- Vge / Vp
+  prop_Vspatial <- Vspatial / Vp
+  prop_Ve <- Ve / Vp
+  
+  h2_plot <- Vg / Vp
+  
+  # Mean replication
+  rep_counts <- data_clean %>%
+    group_by(Env, GID) %>%
+    summarise(n = n(), .groups = 'drop')
+  r <- n_obs/n_geno
+  
+  h2_mean <- Vg / (Vg + Vge/n_env + Vspatial/r + Ve/r)
+  
+  # Genetic correlation
+  rg_env <- Vg / (Vg + Vge)
+  
+  # Determine PC type and number
+  pc_type <- ifelse(grepl("FPCA|FPC", trait, ignore.case = TRUE), "FPCA", "PCA")
+  pc_number <- as.numeric(gsub(".*PC(\\d+).*", "\\1", trait))
+  
+  # Results
+  results <- data.frame(
+    Model = "Multi_Env_PC",
+    Trait = trait,
+    PC_Type = pc_type,
+    PC_Number = pc_number,
+    Vg = round(Vg, 4),
+    Vge = round(Vge, 4),
+    Vspatial = round(Vspatial, 4),
+    Ve = round(Ve, 4),
+    Vp = round(Vp, 4),
+    prop_Vg = round(prop_Vg, 4),
+    prop_Vge = round(prop_Vge, 4),
+    prop_Vspatial = round(prop_Vspatial, 4),
+    prop_Ve = round(prop_Ve, 4),
+    h2_plot = round(h2_plot, 4),
+    h2_mean = round(h2_mean, 4),
+    rg_env = round(rg_env, 4),
+    n_env = n_env,
+    n_obs = n_obs,
+    n_geno = n_geno,
+    mean_rep = round(r, 2),
+    converged = mod$converge,
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(model = mod, results = results, varcomp = vc))
+}
+
+# ==============================================================================
+# RUN ANALYSIS FOR ALL PC TRAITS
+# ==============================================================================
+
+# Storage
+all_results_single_pc <- list()
+all_results_multi_pc <- list()
+results_single_pc_df <- data.frame()
+results_multi_pc_df <- data.frame()
+failed_combos <- data.frame()
+
+# SINGLE-ENVIRONMENT ANALYSIS
+
+for (trait in traits) {
+  for (env in envs) {
+    
+    cat("\n--- Processing:", trait, "in", env, "---\n")
+    
+    result <- calculate_h2_pc_single(data_pc, env, trait)
+    
+    if (!is.null(result)) {
+      key <- paste(env, trait, sep = "_")
+      all_results_single_pc[[key]] <- result
+      results_single_pc_df <- rbind(results_single_pc_df, result$results)
+    } else {
+      failed_combos <- rbind(failed_combos, data.frame(
+        Env = env,
+        Trait = trait,
+        reason = "Insufficient data or model failure"
+      ))
+    }
+  }
+}
+
+# MULTI-ENVIRONMENT ANALYSIS
+
+for (trait in traits) {
+  
+  cat("\n--- Processing:", trait, "across all environments ---\n")
+  
+  result <- calculate_h2_pc_multi(data_pc, trait)
+  
+  if (!is.null(result)) {
+    all_results_multi_pc[[trait]] <- result
+    results_multi_pc_df <- rbind(results_multi_pc_df, result$results)
+  }
+}
+
+
+# ==============================================================================
+# SUMMARY STATISTICS
+# ==============================================================================
+
+if (nrow(results_single_pc_df) > 0) {
+  
+  # Summary by PC type
+  cat("===== SUMMARY BY PC TYPE =====\n")
+  summary_pc_type <- results_single_pc_df %>%
+    group_by(PC_Type) %>%
+    summarise(
+      n_models = n(),
+      mean_h2 = round(mean(h2_mean, na.rm = TRUE), 3),
+      sd_h2 = round(sd(h2_mean, na.rm = TRUE), 3),
+      min_h2 = round(min(h2_mean, na.rm = TRUE), 3),
+      max_h2 = round(max(h2_mean, na.rm = TRUE), 3),
+      .groups = 'drop'
+    )
+  print(summary_pc_type)
+  
+  # Summary by PC number
+  cat("\n===== SUMMARY BY PC NUMBER =====\n")
+  summary_pc_num <- results_single_pc_df %>%
+    group_by(PC_Type, PC_Number) %>%
+    summarise(
+      n_env = n(),
+      mean_h2 = round(mean(h2_mean, na.rm = TRUE), 3),
+      sd_h2 = round(sd(h2_mean, na.rm = TRUE), 3),
+      .groups = 'drop'
+    ) %>%
+    arrange(PC_Type, PC_Number)
+  print(summary_pc_num)
+}
+
+if (nrow(results_multi_pc_df) > 0) {
+  cat("\n===== MULTI-ENVIRONMENT SUMMARY =====\n")
+  print(results_multi_pc_df)
+}
+```
+
+
+
+
+
+
+## **2. Plots for heritability**
+```{r}
+colnames(results_single_df)[8]<- "H2"
+agmqh<- rbind(results_single_df[,c(1:3,8,10:13)], results_single_mq_df[,c(1:3,12:14, 16, 17)])
+
+
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+
+
+pal1 <- c(
+  NDVI  = "palegreen2",
+  PSRI  = "cornsilk3"
+)
+
+trait_map <- c(
+  "winter_survival"  = "WS",
+  "KernelWeight.mg." = "KW",
+  "on6.64...."       = "on6/64", 
+  "MaltExtract..."   = "ME",
+  "BarleyProtein..." = "BP",
+  "WortProtein..."   = "WP",
+  "S.T"              = "S.T", 
+  "DP..ASBC."       = "DP", 
+  "Alpha.amylase.20.DU." = "AA", 
+  "Beta.glucan.ppm." = "BG",
+  "HD_JD" = "HD", 
+  "yield_kgha" = "GY", 
+  "FAN.ppm."         = "FAN", 
+  "AdjunctQualityScore" = "Adj.Sc",
+  "All_MaltQualityScore" = "All.Sc")
+
+trait_order<- c( "GY" , "HD",  "WS", "KW", "on6/64" , "FAN" , "DP", "AA", "S.T" , "BG" , "ME",  "BP", "WP", "Adj.Sc", "All.Sc" )
+
+library(RColorBrewer)
+base_pal <- brewer.pal(12, "Set3")
+extra_pal <- brewer.pal(8, "Dark2")
+pal_combined <- c(base_pal, extra_pal)
+#scale_fill_manual(values = pal_combined) +
+
+```
+
+
+
+
+### **2.1 VI heritability**
+```{r, results='markup'}
+H2sp1<- model1_results$results
+
+colnames(H2sp1)[c(2,4, 10)] <- c("Environment", "Trait", "H2")
+H2sp<- H2sp1
+H2sp$Environment<- as.factor(H2sp$Environment)
+
+###############################################################################
+#Summmary over Env and over VI
+H2sp_summary <- H2sp %>%
+  group_by(Environment, Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+
+
+H2sp_summary1 <- H2sp %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+#######################################################################
+# Reorder factor to ENV
+H2sp <- H2sp %>%
+  mutate(Environment = factor(Environment, levels = env_order))
+
+# Add timepoint date
+load("data/wmb_multi_alldata.Rdata")
+timepoint_JD <- multi[,c(1, 3, 9, 10, 30, 31)] %>%
+  distinct()  
+
+colnames(timepoint_JD)[1] <- "Environment"
+H2sp <- H2sp %>%
+  left_join(timepoint_JD, by = c("Environment","Timepoint"))
+H2sp$JD<- as.numeric(H2sp$DAS)
+
+# Adjust timepoints
+H2sp<- H2sp %>% arrange(Trait,Environment,  Timepoint)
+library(lubridate)
+H2sp$H2[H2sp$converged == FALSE] <- 0.00
+H2sp <- H2sp %>% filter(converged == "TRUE") %>% filter(H2 > 0.05) %>% filter(month(Date) > 3 )  
+
+
+
+
+
+
+# Plot the bar-s over time for both ENV and VIs. 
+ggplot(H2sp, aes(x = Date, y = H2, fill = Environment)) +
+  geom_col(width = 40) +
+  scale_fill_manual(values = pal_combined) +
+  facet_grid(Trait~Environment, scales= "free_x") +
+  labs(x = "Flight ", y = "Heritability (H²)") +
+   coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+#Plot 2
+p1 <- ggplot(H2sp, aes(x = as.Date(Date), y = H2, 
+                        color = Trait, group = Trait)) +
+  geom_point(size = 4, alpha = 0.7) +
+  scale_fill_manual(values = pal_combined) +
+  geom_line(linewidth = 1.5) +
+  facet_grid(~Environment, scales = "free_x") +
+  labs(x = "Flight ", y = "Heritability (H²)") +
+   coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  ) +
+  scale_x_date(
+    date_breaks = "2 weeks",
+    date_labels = "%b %d"         
+  ) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2))
+
+print(p1)
+results_df<- H2sp
+```
+
+
+
+### **2.2 MQ and ag heritability**
+```{r, results='markup'}
+H2s<- agmqh
+
+H2s <- H2s %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+###############################################################################
+#Summmary over Env and over VI
+H2s_summary <- H2s %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    max_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(min_H)
+
+
+H2sp_summary1 <- H2sp1 %>%
+  group_by(Trait) %>%
+  summarize(
+    mean_H = mean(H2, na.rm = TRUE),
+    min_H = min(H2, na.rm = TRUE), 
+    ma_H = max(H2, na.rm = TRUE),
+    n      = n()) %>% 
+  arrange(Trait)
+###############################################################################
+#Plot all trit h2 over yers. 
+
+H2s <- H2s %>%  mutate( Environment = trimws(as.character(Env)),
+    Environment = fct_relevel(Env, env_order)  
+  ) %>% mutate( Trait= trimws(as.character(Trait)),
+    Trait = fct_relevel(Trait, trait_order))
+
+H2s$H2 <- as.numeric(H2s$H2)
+
+H2s<- H2s %>% filter(converged == TRUE)
+ggplot(H2s, aes(x=Environment,  y = H2, fill = Environment)) +
+  geom_col()+
+   scale_fill_manual(values = pal_combined) +
+  facet_grid(~Trait, scales= "free_x") +
+  labs(x = "Environment", y = "H^2") +
+ coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),  legend.position = "bottom"
+  )
+#Plot all h2 points over traits 
+ggplot(H2s, aes(x = Trait, y = H2, color = Trait)) +
+  geom_point(size = 5) +
+   scale_fill_manual(values = pal_combined) +
+  labs(x = "Environment", y = "H^2") +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  )
+
+ggplot(H2s, aes(x = Trait, y = H2, color = Trait)) +
+  geom_boxplot()+
+   scale_color_manual(values = pal_combined) +
+  facet_grid(~Trait, scales = "free_x") +
+  labs(x = "Environment", y = "H^2") +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+#################################################################################
+colnames(results_multi_mq_df)[13]<- "H2_mean"
+colnames(results_multi_df)[13]<- "H2_mean"
+
+res_mult<- rbind(results_multi_df[,c(1:4, 13)], results_multi_mq_df[,c(1:4, 13)])
+
+res_mult <- res_mult %>%
+  mutate(Trait = recode(Trait, !!!trait_map))
+
+
+res_mult <- res_mult %>% mutate( Trait= trimws(as.character(Trait)),
+    Trait = fct_relevel(Trait, trait_order))
+
+
+
+#Plot multi model ag and MQ heritabilites
+p3 <- ggplot(res_mult, aes(x = Trait, y = H2_mean)) +
+    geom_bar(stat = "identity", fill = "cornsilk3", color = "black") +
+    geom_text(aes(label = round(H2_mean, 2)), vjust = -0.5, size = 5) +
+    labs(
+      #title = "Multi-Environment Heritability",
+      x = "Trait",
+      y = "Heritability (H²)"
+    ) + 
+  coord_cartesian(ylim = c(0, 1)) +
+    theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  )
+  
+print(p3)
+```
+
+
+
+###  **2.3 Plots for PC and FPC heritability**
+```{r, results='markup'}
+#Broad sene heritability of VI_PC-s over Envs. 
+H2PC1 <- results_single_pc_df  
+colnames(H2PC1)[c(2, 14)] <- c("Environment", "H2") 
+
+
+H2PC<- H2PC1
+H2PC$Environment <- factor(H2PC$Environment, levels = env_order)
+H2PC<- H2PC %>% arrange(Environment)
+
+
+H2PC <- H2PC %>%
+  separate(Trait, into = c("VI", "Component"), sep = "_", remove = FALSE)
+
+H2PCF<- H2PC %>% filter(PC_Type == "FPCA")
+
+#Plot all trait h2 over yers. 
+
+ggplot(H2PCF, aes(x = Component, y = H2, fill = Environment)) +
+  geom_col() +
+  scale_fill_manual(values = pal_combined) +
+  facet_grid(~VI~Environment, scales = "free") +
+  labs(x = "Trait", y = "H^2") +
+  coord_cartesian(ylim = c(0, 1)) +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 12, angle = 90),
+    legend.position = "bottom"
+  )
+
+
+###############################################################################
+
+# Plot 1: h² by PC number for FPCA vs PCA
+p1 <- ggplot(H2PCF, 
+               aes(x = factor(PC_Number), y = H2)) +
+    geom_boxplot(alpha = 0.7,fill = "cornsilk3", color = "black") +
+    facet_grid(~VI, scales= "free") +
+    labs(
+      x = "FPC Number",
+      y = "Heritability (H²)",
+      fill = "Method"
+    )+ 
+  coord_cartesian(ylim = c(0, 1)) +
+    theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text  = element_text(size = 14, angle = 90),
+    legend.position = "bottom"
+  )
+
+p1
+```
+
+
+```{r}
+H2ss<- list(H2PC, H2s, H2sp)
+save(H2PC, H2s, H2sp, file = "heritabilites_f.Rdata")
+```
+

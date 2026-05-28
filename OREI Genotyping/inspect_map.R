@@ -1,5 +1,0 @@
-library(readxl)
-map <- read_excel("C:/Users/Siim Sepp/NY_WMBCL/OREI Genotyping/map_UMN.xlsx")
-cat("Dimensions:", nrow(map), "x", ncol(map), "\n")
-cat("Column names:", paste(names(map), collapse=", "), "\n")
-print(head(map, 30))

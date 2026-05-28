@@ -1,0 +1,326 @@
+﻿---
+title: "5.FPCA and PCA"
+author: "sss322"
+date: "2025-04-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+
+
+
+# **0. Importing data and packages**
+```{r, eval=TRUE}
+load("data/VImatG.Rdata")
+pkgs <- c("dplyr","tidyr","readr","readxl","lubridate","stringr", "ggplot2", "forcats", "ASRtriala", "openxlsx", "fdapace", "stringr")
+suppressPackageStartupMessages(invisible(lapply(pkgs, require, character.only = TRUE)))
+```
+
+
+
+# **1. PCA and FPCA analysis**
+
+```{r, eval=TRUE}
+# Output dataframes
+PCA_variance_df <- data.frame()
+PCA_scores_df   <- data.frame()
+PCA_loadings_df <- data.frame()
+
+FPCA_eigen_df   <- data.frame()
+FPCA_scores_df  <- data.frame()
+
+
+# Loop over environments and VIs
+for (env in names(VImats)) {
+  mats <- names(VImats[[env]])[-10]
+
+  for (vi in mats) {
+    df <- VImats[[env]][[vi]] %>% na.omit()
+    rownames(df) <- df$plot_id
+    mat <- df[, -1]
+    mat_scaled <- scale(mat)
+
+    ## --- PCA ---
+    pca <- prcomp(mat_scaled, center = FALSE, scale. = FALSE)
+
+    # Variance explained
+    pca_var <- pca$sdev^2
+    pca_var_df <- data.frame(
+      Env = env, VI = vi,
+      PC = paste0("PC", seq_along(pca_var)),
+      Variance = pca_var / sum(pca_var)
+    )
+    PCA_variance_df <- bind_rows(PCA_variance_df, pca_var_df)
+
+    # Loadings
+    loadings <- as.data.frame(pca$rotation)
+    #loadings$Timepoint <- as.numeric(gsub("[^0-9]", "", colnames(mat)))
+    loadings$Timepoint <- as.numeric(colnames(mat))
+    loadings$Env <- env
+    loadings$VI <- vi
+    PCA_loadings_df <- bind_rows(
+      PCA_loadings_df,
+      loadings %>%
+        pivot_longer(cols = starts_with("PC"), names_to = "PC", values_to = "Loading")
+    )
+
+    # Scores
+    scores <- as.data.frame(pca$x)
+    scores$plot_id <- df$plot_id
+    scores$Env <- env
+    scores$VI <- vi
+    PCA_scores_df <- bind_rows(PCA_scores_df, scores)
+
+    ## --- FPCA ---
+    long_df <- df %>%
+      pivot_longer(-plot_id, names_to = "Time", values_to = "value")
+    long_df$Time<- as.numeric(long_df$Time)
+
+    Ly <- split(long_df$value, long_df$plot_id)
+    Lt <- split(long_df$Time, long_df$plot_id)
+
+    fpca <- FPCA(Ly = Ly, Lt = Lt, optns = list(dataType = 'Sparse', methodSelectK = 3))
+
+    # Eigenfunctions
+    eigen_df_tmp <- data.frame(
+      Env = env, VI = vi,
+      Time = fpca$workGrid,
+      FPC1 = fpca$phi[, 1],
+      FPC2 = fpca$phi[, 2],
+      FPC3 = fpca$phi[, 3]
+    )
+    FPCA_eigen_df <- bind_rows(FPCA_eigen_df, eigen_df_tmp)
+
+    # FPCA scores
+    scores_fpca <- as.data.frame(fpca$xiEst)
+    colnames(scores_fpca) <- paste0("FPC", 1:ncol(scores_fpca))
+    scores_fpca$plot_id <- df$plot_id
+    scores_fpca$Env <- env
+    scores_fpca$VI <- vi
+    FPCA_scores_df <- bind_rows(FPCA_scores_df, scores_fpca)
+  }
+}
+
+FPCA_var_df <- FPCA_scores_df %>%
+  #select(starts_with("FPC"), Env, VI) %>%  # Keep Env and VI for grouping
+  pivot_longer(cols = starts_with("FPC"), names_to = "FPC", values_to = "score") %>%
+  group_by(FPC, Env, VI) %>%
+  summarise(variance = var(score), .groups = "drop") %>%
+  group_by(Env, VI) %>%
+  mutate(
+    variance_ratio = variance / sum(variance),
+    FPC = factor(FPC, levels = unique(FPC))
+  )
+
+table(PCA_scores_df$Env, PCA_scores_df$VI)
+table(FPCA_scores_df$Env, FPCA_scores_df$VI)
+#each VI has one score (phenotype) for a VI in Env. 
+#Basically every PCn or FPCn is a phenotype. VI:Env combinations.
+PCA_scores_df<- PCA_scores_df %>% filter(!VI == "GDVI")
+PCA_variance_df<- PCA_variance_df %>% filter(!VI == "GDVI")
+
+FPCA_scores_df<- FPCA_scores_df %>% filter(!VI == "GDVI")
+FPCA_var_df<- FPCA_var_df %>% filter(!VI == "GDVI")
+
+save(PCA_scores_df, FPCA_scores_df, file= "data/F_PCA_scoresG.Rdata")
+```
+
+
+
+
+
+
+# **2. Screeplots, heatmap FPC over time and over Env**
+
+```{r}
+base_path <- if (.Platform$OS.type == "windows") {
+  "C:/Users/Siim Sepp/Predicting_WMB_for_NY"
+} else {
+  "~/Documents/GitHub/Predicting_WMB_for_NY"
+}
+load(file.path(base_path, "data/data_ag.Rdata"))
+load(file.path(base_path, "data/data_mq.Rdata"))
+load(file.path(base_path, "data/data_sp.Rdata"))
+load(file.path(base_path, "data/data_spG.Rdata"))
+mapJD <- readxl::read_excel("data/Flights/flightdate.xlsx")
+
+
+pal <- c(
+  KET21  = "cornsilk3",
+  SNY22  = "palegreen2",
+  MCG23  = "wheat2",
+  HELF24 = "lightblue3", 
+  MCG25 = "yellow3"
+)
+```
+
+
+
+```{r}
+###############################################
+#Scree plot for PC, Var exp by PCs in Env-s, all VIs together. 
+vis<- c("NDVI", "PSRI")
+FPCA_variance_df1<- FPCA_var_df %>% filter( FPC %in% c("FPC1", "FPC2", "FPC3")) %>% filter(VI %in% vis)
+
+
+ggplot(FPCA_variance_df1, aes(x = FPC, y = variance_ratio, color = Env, group = Env)) +
+  geom_line(size = 2) +
+  facet_wrap(~VI) +
+  scale_color_manual(values = pal, drop = FALSE) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    #title = "Variance Explained by Principal Components",
+    x = "Principal Component",
+    y = "Explained Variance (%)",
+    color = "Environment"
+  ) +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 14, hjust = 0.5, face = "bold"), 
+    legend.position = "bottom"
+  )
+  #theme_minimal(base_size = 13) +
+      
+
+
+
+##################################################
+#scatter plot PC1 vs PC2
+ggplot(PCA_scores_df, aes(x = PC1, y = PC2, color = Env)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~ VI) +
+  labs(title = "PC1 vs PC2: Genotypic Scores by Environment",
+       x = "PC1",
+       y = "PC2")+
+    theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 18, hjust = 0.5, face = "bold")
+  )
+
+
+#scatter plot FPC1 vs FPC2
+ggplot(FPCA_scores_df, aes(x = FPC1, y = FPC2, color = Env)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~VI) +
+  labs(
+    title = "FPC1 vs FPC2: Genotypic Scores by Environment",
+    x = "FPC1 (Overall Shape)",
+    y = "FPC2 (Timing Shift)"
+  ) +
+    theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 18, hjust = 0.5, face = "bold")
+  )
+
+
+############################################################################################
+#Heatmap for FPC and PC correlations. 
+hist(FPCA_eigen_df$Time)
+FPCA_scores<- merge(FPCA_scores_df, PCA_scores_df[,c(1:3, 8,10)], by= c("VI", "plot_id")) #deletes TPs from some locations. 
+heatmap(cor(FPCA_scores[, c(3:5,7:9)]), 
+        Rowv = NA, 
+        Colv = NA, 
+        scale = "none", 
+        main = "Correlation Heatmap of FPC Scores")
+```
+
+
+
+
+```{r}
+# 1) Helper to standardize Env
+std_env <- function(x) {
+  x %>%
+    as.character() %>%
+    toupper() %>%
+    str_replace_all("\\s+", "") %>%     
+    str_replace("^(\\d{2})([A-Z]+)$", "\\2\\1") %>%
+    str_replace("^([A-Z]+)(\\d{2})$", "\\1\\2")
+}
+
+eigen_long <- FPCA_eigen_df %>%
+  pivot_longer(
+    cols = starts_with("FPC"),
+    names_to = "Component",
+    values_to = "Value"
+  )
+
+# 2) Coerce column types & standardize Env in both data frames
+eigen_long <- eigen_long %>%
+  mutate(
+    Env       = std_env(Env),
+    VI        = as.character(VI),
+    Time      = as.numeric(Time),
+    Component = as.character(Component),  # keep as character or set a factor below
+    Value     = as.numeric(Value)
+  )
+
+
+
+
+
+eigen_long_interp <- eigen_long %>% filter(Time > 150) %>% filter(!Component == "FPC3") %>% filter(VI %in% c("NDVI", "PSRI"))
+env_order<- c( "KET21", "SNY22" ,"MCG23","HELF24" , "MCG25" )
+
+eigen_long_interp <- eigen_long_interp %>%  mutate( Env = trimws(as.character(Env)),
+    Env = fct_relevel(Env, env_order)  
+  )
+
+# FPC smooth each ENV VI separated. 
+ggplot(eigen_long_interp, aes(x = Time, y = Value, color = Env)) +
+  geom_line(size = 2) +
+  facet_grid(Component~VI) +
+   scale_color_manual(values = pal, drop = FALSE) +
+  labs(#title = "FPCA Eigenfunctions Over Time",
+       x = "GDD", y = "Eigenfunction Value") +
+    theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 14, hjust = 0.5, face = "bold"), 
+    legend.position = "bottom"
+  )
+
+str(eigen_long_interp)
+
+FPCA_var_df <- FPCA_var_df %>% filter(VI %in% vis)
+comp_summary <- FPCA_var_df %>%
+  group_by(FPC) %>%
+  summarise(
+    n = n(),
+    mean = round(mean(variance_ratio, na.rm = TRUE), 5),
+    sd = round(sd(variance_ratio, na.rm = TRUE), 5),
+    min = round(min(variance_ratio, na.rm = TRUE), 5),
+    max = round(max(variance_ratio, na.rm = TRUE), 5),
+    range= round(max(variance_ratio - min(variance_ratio), na.rm = TRUE), 5),
+    .groups = 'drop'
+  ) %>% arrange(FPC)
+
+
+print(comp_summary)
+
+```
+
+
+
+
+# **3. Extracting the scores for further MT-GP**
+```{r, eval=FALSE}
+str(F_PCA)
+F_PCA <- (FPCA_scores[,1:6])
+MT_F_PC_raw_ag <- left_join(data_ag, F_PCA, by= c("Env", "plot_id"))
+MT_F_PC_raw_MQ <- left_join(data_mq, F_PCA, by= c("Env", "plot_id"))
+
+save(MT_F_PC_raw_MQ, MT_F_PC_raw_ag, file= "data/F_PCA_pheno_comb.Rdata")
+```
+

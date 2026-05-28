@@ -1,4 +1,0 @@
-neighboring_snp,gene_id,gene_start,gene_end,strand,biotype,canonical_transcript,external_gene_name,description,gene_biotype,percentage_gene_gc_content,go_ids,go_terms,go_domains,canonical_transcript_id,canonical_transcript_length,canonical_transcript_biotype,uniprot_ids,arabidopsis_gene_id,arabidopsis_gene_name,arabidopsis_orthology,arabidopsis_perc_id
-16414440,HORVU.MOREX.r3.5HG0426430,16325229,16325603,1,protein_coding,HORVU.MOREX.r3.5HG0426430.1.,NA,NA,protein_coding,47.2,NA,NA,NA,HORVU.MOREX.r3.5HG0426430.1,375,protein_coding,NA,NA,NA,NA,NA
-16414440,HORVU.MOREX.r3.5HG0426460,16502111,16502468,1,protein_coding,HORVU.MOREX.r3.5HG0426460.1.,NA,NA,protein_coding,51.68,NA,NA,NA,HORVU.MOREX.r3.5HG0426460.1,285,protein_coding,NA,NA,NA,NA,NA
-16414440,HORVU.MOREX.r3.5HG0426450,16414458,16414928,1,protein_coding,HORVU.MOREX.r3.5HG0426450.1.,NA,NA,protein_coding,64.12,NA,NA,NA,HORVU.MOREX.r3.5HG0426450.1,471,protein_coding,NA,NA,NA,NA,NA
