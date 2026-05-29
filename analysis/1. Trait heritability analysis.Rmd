@@ -73,7 +73,12 @@ cat("Sample sizes by environment:\n")
 print(table(data_mq$Env))
 
 # Load genomic relationship matrix
-load("data/geno/WMB_master_geno.RData")  # Contains A1 matrix
+geno_paths <- c("C:/Users/Siim Sepp/Predicting_WMB_for_NY/data/geno/WMB_master_geno.RData",
+                "~/Documents/GitHub/Predicting_WMB_for_NY/data/geno/WMB_master_geno.RData",
+                "data/geno/WMB_master_geno.RData")
+geno_file <- Filter(file.exists, geno_paths)[1]
+if (is.na(geno_file)) stop("WMB_master_geno.RData not found in any known location")
+load(geno_file)  # Contains A1 matrix
 cat("\nGenomic relationship matrix loaded. Dimension:", dim(A1), "\n\n")
 
 # ==============================================================================
@@ -174,9 +179,9 @@ calculate_h2_mq_single <- function(data, env, trait, A_matrix) {
   
   # Extract components
   
-  Vg <- vc[1, "component"]      # Additive genetic variance
-  Vfam <- vc[2, "component"]    # Family variance
-  Ve <- vc[3, "component"]      # Residual variance
+  Vg   <- vc[grep("vm\\(GID",  rownames(vc))[1], "component"]
+  Vfam <- vc[grep("^Fam",      rownames(vc))[1], "component"]
+  Ve   <- vc[grep("units|R!",  rownames(vc))[1], "component"]
   
   # Mean "replication" (usually 1 for MQ traits)
   rep_counts <- table(data_subset$GID)
@@ -581,7 +586,12 @@ cat("Agronomic Traits:", paste(traits, collapse = ", "), "\n")
 cat("Environments:", paste(envs, collapse = ", "), "\n\n")
 
 # Load genomic relationship matrix
-load("data/geno/WMB_master_geno.RData")  # Contains A1 matrix
+geno_paths <- c("C:/Users/Siim Sepp/Predicting_WMB_for_NY/data/geno/WMB_master_geno.RData",
+                "~/Documents/GitHub/Predicting_WMB_for_NY/data/geno/WMB_master_geno.RData",
+                "data/geno/WMB_master_geno.RData")
+geno_file <- Filter(file.exists, geno_paths)[1]
+if (is.na(geno_file)) stop("WMB_master_geno.RData not found in any known location")
+load(geno_file)  # Contains A1 matrix
 cat("Genomic relationship matrix loaded. Dimension:", dim(A1), "\n\n")
 
 # ==============================================================================
@@ -1403,7 +1413,7 @@ if (nrow(results_multi_df) > 0) {
 # ==============================================================================
 
 data<- merge(data_sp, data_ag[,c(1,5,6)], by= "plot_id")
-colnames(data)[4]<- "timepoint"
+colnames(data)[4]<- "tp_col"
 
 # ==============================================================================
 # MODEL 1: THROUGH ALL VALID VI:ENV COMBINATIONS
@@ -1418,7 +1428,7 @@ model_1_single <- function(data, env, timepoint, vi) {
   
   # Filter and prepare data
   data_subset <- data %>%
-    filter(Env == env, timepoint == !!timepoint) %>%  # FIXED: Added timepoint filter
+    filter(Env == env, tp_col == timepoint) %>%
     filter(!is.na(!!sym(vi))) %>%
     mutate(
       GID = factor(GID),
@@ -1521,8 +1531,8 @@ run_model1_all_combinations <- function(data, vis = c("NDVI", "PSRI")) {
     #select(Env, timepoint) %>%
     pivot_longer(cols = all_of(vis), names_to = "VI", values_to = "value") %>%
     filter(!is.na(value)) %>%
-    distinct(Env, timepoint, VI) %>%
-    arrange(Env, VI, timepoint)
+    distinct(Env, tp_col, VI) %>%
+    arrange(Env, VI, tp_col)
   
   cat("\nTotal valid combinations found:", nrow(data_combos), "\n")
   cat("\nBreakdown by Environment:\n")
@@ -1532,7 +1542,7 @@ run_model1_all_combinations <- function(data, vis = c("NDVI", "PSRI")) {
     group_by(Env, VI) %>%
     summarise(
       n_timepoints = n(),
-      timepoints = paste(sort(unique(timepoint)), collapse = ", "),
+      timepoints = paste(sort(unique(tp_col)), collapse = ", "),
       .groups = 'drop'
     )
   print(summary_table)
@@ -1546,7 +1556,7 @@ run_model1_all_combinations <- function(data, vis = c("NDVI", "PSRI")) {
   for (i in 1:nrow(data_combos)) {
     
     env <- as.character(data_combos$Env[i])
-    tp <- data_combos$timepoint[i]
+    tp <- data_combos$tp_col[i]
     vi <- data_combos$VI[i]
     
     cat("\n[", i, "/", nrow(data_combos), "] Processing:", 

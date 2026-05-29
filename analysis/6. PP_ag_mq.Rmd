@@ -95,6 +95,7 @@ run_pheno_models_long <- function(data_long, VImats, model_list = c("rf", "lm", 
 
           nzv <- nearZeroVar(train, saveMetrics = TRUE)
           train <- train[, !nzv$nzv]
+          test  <- test[, colnames(train)]
 
           if (ncol(train) <= 1) next
 
@@ -213,7 +214,7 @@ data_mq<- data_mq%>%
 PP_LM_results_ag_raw  <- run_pheno_models_long(data_ag, VImats, model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 5)
 
 #hist(PP_LM_results_ag_raw$accuracy$Accuracy)
-save(PP_LM_results_ag_raw, file= "PP_LM_results_ag_raw.Rdata")
+save(PP_LM_results_ag_raw, file= file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
 #table(PP_LM_results_ag_raw$accuracy$Environment, PP_LM_results_ag_raw$accuracy$Trait)
 #boxplot(PP_LM_results_ag_raw$accuracy$Accuracy~ PP_LM_results_ag_raw$accuracy$Trait)
 ```
@@ -226,7 +227,7 @@ save(PP_LM_results_ag_raw, file= "PP_LM_results_ag_raw.Rdata")
 ```{r}
 PP_LM_results_mq_raw  <- run_pheno_models_long(data_mq, VImats[c(1,3)], model_list = c("rf", "lm", "glmnet", "pcr"), cycles = 50)
 
-save(PP_LM_results_mq_raw, file= "PP_LM_results_mq_raw.Rdata")
+save(PP_LM_results_mq_raw, file= file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
 ```
 
 
@@ -240,10 +241,10 @@ base_path <- if (.Platform$OS.type == "windows") {
   "~/Documents/GitHub/Predicting_WMB_for_NY"
 }
 library(dplyr)
-load(file.path(base_path, "output/PP_LM_results_ag_pred.Rdata"))
+load(file.path(base_path, "output/PP_LM_results_ag_raw.Rdata"))
 load(file.path(base_path, "output/PP_LM_results_mq_raw.Rdata"))
 
-ag_sum <- PP_LM_results_ag_pred$accuracy %>%
+ag_sum <- PP_LM_results_ag_raw$accuracy %>%
   group_by(Trait) %>%
   summarise(mean_r = round(mean(Accuracy, na.rm=TRUE), 3),
             sd_r   = round(sd(Accuracy,   na.rm=TRUE), 3), .groups="drop") %>%

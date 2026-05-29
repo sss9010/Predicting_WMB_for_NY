@@ -254,7 +254,7 @@ save(GP_DK_results_mq_raw_sel, file = file.path(base_path, "output/GP_DK_results
 ```{r}
 load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
 data_ag_blue <- preds %>% pivot_wider(names_from = "VI", values_from = "Predicted")
-traits <- colnames(data_ag_blue)[c(4, 7)]
+traits <- intersect(c("yield_kgha", "HD_JD", "winter_survival"), colnames(data_ag_blue))
 envs   <- unique(data_ag_blue$Env)
 
 GP_DK_results_ag_pred <- run_doublekernel_cv1(data = data_ag_blue, A1 = A1, VImat = VIPS,
@@ -274,10 +274,10 @@ base_path <- if (.Platform$OS.type == "windows") {
   "~/Documents/GitHub/Predicting_WMB_for_NY"
 }
 library(dplyr)
-load(file.path(base_path, "output/GP_DK_results_ag_pr.Rdata"))
+load(file.path(base_path, "output/GP_DK_results_ag_pred.Rdata"))
 load(file.path(base_path, "output/GP_DK_results_mq_raw_sel.Rdata"))
 
-ag_sum <- GP_DK_results_ag_pr$results %>%
+ag_sum <- GP_DK_results_ag_pred$results %>%
   group_by(Trait) %>%
   summarise(mean_r = round(mean(Cor, na.rm=TRUE), 3),
             sd_r   = round(sd(Cor,   na.rm=TRUE), 3), .groups="drop") %>%

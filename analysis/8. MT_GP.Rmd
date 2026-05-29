@@ -53,18 +53,18 @@ corVI_raw <- data.frame(
     rownames(MT_raw_w$MCG25_12)
   ),
   NDVI = c(
-    MT_raw_w$KET21_4[, 1],
-    MT_raw_w$SNY22_6[, 1],
-    MT_raw_w$MCG23_5[, 1],
-    MT_raw_w$HELF24_7[, 1],
-    MT_raw_w$MCG25_12[, 1]
+    MT_raw_w$KET21_4[, "NDVI"],
+    MT_raw_w$SNY22_6[, "NDVI"],
+    MT_raw_w$MCG23_5[, "NDVI"],
+    MT_raw_w$HELF24_7[, "NDVI"],
+    MT_raw_w$MCG25_12[, "NDVI"]
   ),
   PSRI = c(
-    MT_raw_w$KET21_4[, 9],
-    MT_raw_w$SNY22_6[, 9],
-    MT_raw_w$MCG23_5[, 9],
-    MT_raw_w$HELF24_7[, 9],
-    MT_raw_w$MCG25_12[, 9]
+    MT_raw_w$KET21_4[, "PSRI"],
+    MT_raw_w$SNY22_6[, "PSRI"],
+    MT_raw_w$MCG23_5[, "PSRI"],
+    MT_raw_w$HELF24_7[, "PSRI"],
+    MT_raw_w$MCG25_12[, "PSRI"]
   )
 )
 
@@ -82,18 +82,18 @@ corVI_pr <- data.frame(
     rownames(MT_pr_w$MCG25_12)
   ),
   NDVI = c(
-    MT_pr_w$KET21_4[, 1],
-    MT_pr_w$SNY22_6[, 1],
-    MT_pr_w$MCG23_5[, 1],
-    MT_pr_w$HELF24_7[, 1],
-    MT_pr_w$MCG25_12[, 1]
+    MT_pr_w$KET21_4[, "NDVI"],
+    MT_pr_w$SNY22_6[, "NDVI"],
+    MT_pr_w$MCG23_5[, "NDVI"],
+    MT_pr_w$HELF24_7[, "NDVI"],
+    MT_pr_w$MCG25_12[, "NDVI"]
   ),
   PSRI = c(
-    MT_pr_w$KET21_4[, 9],
-    MT_pr_w$SNY22_6[, 9],
-    MT_pr_w$MCG23_5[, 9],
-    MT_pr_w$HELF24_7[, 9],
-    MT_pr_w$MCG25_12[, 9]
+    MT_pr_w$KET21_4[, "PSRI"],
+    MT_pr_w$SNY22_6[, "PSRI"],
+    MT_pr_w$MCG23_5[, "PSRI"],
+    MT_pr_w$HELF24_7[, "PSRI"],
+    MT_pr_w$MCG25_12[, "PSRI"]
   ),
   Env = c(
     rep("KET21",  nrow(MT_pr_w$KET21_4)),
@@ -120,7 +120,7 @@ Adding the FPC and PCA data
 load(file.path(base_path, "data/F_PCA_scoresG.Rdata"))
 FPC_scores <- FPCA_scores_df %>%
   filter(VI %in% c("NDVI", "PSRI")) %>%
-  pivot_wider(names_from = VI, values_from = colnames(FPCA_scores_df[1:3]))
+  pivot_wider(names_from = VI, values_from = starts_with("FPC"))
 
 MT_raw_MQ <- left_join(MT_mq_raw_df, FPC_scores[, -2], by = c("plot_id"))
 ```

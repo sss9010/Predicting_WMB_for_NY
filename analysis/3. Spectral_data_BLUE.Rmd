@@ -183,17 +183,17 @@ for (tr in traits) {
         filter(Env == e,
                !is.na(.data[[tr]])) %>%
         mutate(
-          GID = factor(GID),
-          Row = factor(Row),
-          Col = factor(Column)
+          GID    = factor(GID),
+          Row    = factor(Row),
+          Column = factor(Column)
         )
 
       ## model -----------------------------------------------------------------
       mod <- tryCatch(
         asreml(
-          fixed    = reformulate("GID", response = tr),   #
-          random   = ~Row + ~Column,
-          residual = ~ units,              
+          fixed    = reformulate("GID", response = tr),
+          random   = ~ar1(Row):ar1(Column),
+          residual = ~ units,
           data     = dat_sub
         ),
         error = function(err) {

@@ -320,7 +320,7 @@ GP_res <- GP_res %>%
 
 GP_res <- GP_res  %>%  
   mutate( Environment = trimws(as.character(Env)),
-          Environment = fct_relevel(Env, env_order)) %>%
+          Environment = fct_relevel(Environment, env_order)) %>%
   mutate( Trait= trimws(as.character(Trait)),
           Trait = fct_relevel(Trait, trait_order))
 

@@ -36,7 +36,7 @@ FPCA_scores_df  <- data.frame()
 
 # Loop over environments and VIs
 for (env in names(VImats)) {
-  mats <- names(VImats[[env]])[-10]
+  mats <- setdiff(names(VImats[[env]]), "combined")
 
   for (vi in mats) {
     df <- VImats[[env]][[vi]] %>% na.omit()
