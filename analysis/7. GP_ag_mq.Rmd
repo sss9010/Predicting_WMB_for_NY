@@ -1,4 +1,4 @@
-﻿---
+---
 title: "8. GP_ag_mq"
 author: "sss322"
 date: "2025-03-19"
@@ -229,8 +229,9 @@ run_gblup_cv <- function(data, A1, traits, envs = NULL, reps = 50, folds = 5,
 
 ```{r}
 load(file.path(base_path, "data/ag_BLUE_spatial.RData"))
+
 data_ag_blue <- preds[, -5] %>% pivot_wider(names_from = "VI", values_from = "Predicted") %>% na.omit()
-traits <- colnames(data_ag_blue)[c(4, 7)]
+traits <- colnames(data_ag_blue)[c(4, 3)]
 envs   <- unique(data_ag_blue$Env)
 
 GP_MM_results_ag_pred <- run_gblup_cv(data = data_ag_blue, A1 = A1, traits = traits, envs = envs, reps = 50)

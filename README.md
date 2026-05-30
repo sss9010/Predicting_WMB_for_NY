@@ -3,7 +3,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Language: R](https://img.shields.io/badge/Language-R-276DC3.svg)](https://www.r-project.org/)
 [![Framework: workflowr](https://img.shields.io/badge/Framework-workflowr-brightgreen)](https://workflowr.github.io/workflowr/)
-[![Deep Learning: torch](https://img.shields.io/badge/Deep%20Learning-torch-EE4C2C.svg)](https://torch.mlverse.org/)
 
 A reproducible R analysis pipeline for predicting **agronomic** and **malt quality** traits in the NY Winter Malting Barley (WMB) breeding program, combining UAV multispectral drone imagery, Barley 50K SNP genotype data, and multi-year field phenotypes across five environments (2021–2025).
 
@@ -66,20 +65,16 @@ A deep neural network with a **spectral bottleneck** (5 bands → 16 → 8 → *
 
 | Script | Description |
 |--------|-------------|
-| `E1. Multi_spec_pre_processing.Rmd` | Import QGIS zonal statistics from UAV flights; compute NDVI/NDRE; QC and merge with plot IDs |
-| `E2. Spectral_data_BLUP_new.Rmd` | Spatial mixed models on spectral/VI data → BLUPs/BLUEs per timepoint |
-| `E3. Trait_spatial_mod_tester.Rmd` | Test 300 spatial correction models for individual traits via 5-fold CV |
-| `1. Data_Pre_Processing.Rmd` | Merge pedigree, genotype (HapMap), and phenotype data |
-| `2. Trait heritability analysis.Rmd` | Estimate h² and H² for VIs, malt quality, and agronomic traits via ASReml |
-| `3. Spectral_data_BLUE.Rmd` | Spatial BLUE models for spectral and agronomic traits; build VI time-series matrix |
+| `1. Trait heritability analysis.Rmd` | Estimate h² and H² for VIs, malt quality, and agronomic traits via ASReml |
+| `2. Exploratory_pheno_ analysis.Rmd` | Exploratory phenotypic analysis and visualisation |
+| `3. Spectral_data_BLUE.Rmd` | AR1×AR1 spatial BLUE models for spectral and agronomic traits; build VI time-series matrix |
 | `4. F_PCA.Rmd` | PCA and FPCA on spectral time-series; extract functional principal components |
 | `5. Phenomic kernel_build.Rmd` | Build phenomic relationship matrices from VI time-series data |
 | `6. PP_ag_mq.Rmd` | Phenomic prediction for agronomic and malt quality traits |
 | `7. GP_ag_mq.Rmd` | GBLUP cross-validation for agronomic and malt quality traits |
 | `8. MT_GP.Rmd` | Multi-trait GBLUP using spectral VIs and FPCs as correlated helper traits |
-| `10. DK_GP.Rmd` | Double-kernel GBLUP (genomic G + phenomic P kernels) |
+| `10.DK_GP.Rmd` | Double-kernel GBLUP (genomic G + phenomic P kernels) |
 | `11. Prediction_plots.Rmd` | Visualisation and cross-method comparison of prediction accuracies |
-| `13. DNN_Synthetic_VI.Rmd` | DNN-derived Synthetic VI — training, CV, band sensitivity, formula extraction |
 
 ---
 
@@ -89,11 +84,11 @@ A deep neural network with a **spectral bottleneck** (5 bands → 16 → 8 → *
 |----------|----------|
 | `data/geno/` | 50K SNP array in HapMap, VCF, and PLINK formats (Morex V3); DH, RIL, Winter populations |
 | `data/Flights/` | QGIS zonal statistics CSVs from UAV flights across five environments |
-| `data/ag_BLUE_spatial.*` | Agronomic BLUEs (spatially corrected via AR1×AR1) |
-| `data/spec_BLUE_spatial.*` | Spectral BLUEs across timepoints |
-| `data/mq_BLUP_spatial.*` | Malt quality BLUPs |
-| `data/MT_*_mat.Rdata` | Phenomic relationship matrices (raw & BLUE) |
-| `data/F_PCA_scores.Rdata` | Functional PCA scores |
+| `data/ag_BLUE_spatial.RData` | Agronomic BLUEs (spatially corrected via AR1×AR1) |
+| `data/spec_BLUE_spatial.RData` | Spectral BLUEs across timepoints |
+| `data/data_mq.Rdata` | Malt quality phenotype data |
+| `data/MT_pred_mat.Rdata` / `MT_raw_mat.Rdata` | Phenomic relationship matrices (BLUE & raw VI) |
+| `data/F_PCA_scoresG.Rdata` | Functional PCA scores per VI and environment |
 | `data/WMB_pheno.Rdata` | Master merged dataset (bands + VIs + traits) |
 
 **Environments:** HELF24, KET21, MCG23, MCG25, SNY22  
@@ -113,7 +108,7 @@ install.packages(c("asreml", "ASRgenomics", "ASRtriala", "rrBLUP"))
 install.packages(c("glmnet", "ranger", "caret"))
 
 # Functional data analysis
-install.packages("fda")
+install.packages("fdapace")
 
 # Deep learning (DNN Synthetic VI)
 install.packages("torch"); torch::install_torch()
