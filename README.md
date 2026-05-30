@@ -34,27 +34,9 @@ Prediction approaches range from classical mixed models to machine learning and 
 
 ---
 
-## Key Result: DNN-Derived Synthetic Vegetation Index
+## More Results with this data: DNN-Derived Synthetic Vegetation Index
 
 A deep neural network with a **spectral bottleneck** (5 bands → 16 → 8 → **1 Synthetic VI** → trait) learns a data-optimised vegetation index for each target trait — outperforming fixed hand-crafted indices like NDVI under leave-one-environment-out cross-validation.
-
-<p align="center">
-  <img src="assets/figures/synvi_vs_standard_vi.png" width="700"
-       alt="DNN Synthetic VI vs best standard VI — LOEO mean Pearson r"/>
-  <br><em>DNN Synthetic VI vs. best standard VI — LOEO mean Pearson r per trait</em>
-</p>
-
-<p align="center">
-  <img src="assets/figures/loeo_accuracy.png" width="650"
-       alt="LOEO cross-validation accuracy by held-out environment"/>
-  <br><em>Leave-One-Environment-Out accuracy per held-out trial site</em>
-</p>
-
-<p align="center">
-  <img src="assets/figures/band_importance.png" width="600"
-       alt="Gradient-based spectral band importance per trait"/>
-  <br><em>Gradient-based band importance — which spectral channels drive each Synthetic VI</em>
-</p>
 
 🔗 **Standalone DNN repository:** [sss9010/dnn-synthetic-vi](https://github.com/sss9010/dnn-synthetic-vi)  
 📄 **Live report:** [DNN_Synthetic_VI.html](https://sss9010.github.io/dnn-synthetic-vi/DNN_Synthetic_VI.html)
@@ -92,9 +74,9 @@ A deep neural network with a **spectral bottleneck** (5 bands → 16 → 8 → *
 | `data/WMB_pheno.Rdata` | Master merged dataset (bands + VIs + traits) |
 
 **Environments:** HELF24, KET21, MCG23, MCG25, SNY22  
-**Populations:** DH (doubled haploids), RIL (recombinant inbred lines), Winter 2019 lines
+**Populations:** DH (doubled haploids), RIL (recombinant inbred lines)
 
-> Raw genotype files are not redistributed. Processed `.Rdata` intermediates are available on request.
+> `.Rdata`  input files are available in the data folder.
 
 ---
 
@@ -139,7 +121,7 @@ wflow_status()                             # check project status
 ## Citation
 
 ```
-Sepp, S.S., Jannink, J.L., Sorrells, M.E. (2025). NY Winter Malting Barley —
+Sepp, S.S., Sorrells, M.E. (2026). NY Winter Malting Barley —
 Genomic & Phenomic Prediction Pipeline. GitHub.
 https://github.com/sss9010/Predicting_WMB_for_NY
 ```
