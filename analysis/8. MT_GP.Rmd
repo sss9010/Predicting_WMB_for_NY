@@ -1,4 +1,4 @@
-﻿---
+---
 title: "9. MT_GP"
 author: "sss322"
 date: "2025-07-04"
@@ -348,8 +348,7 @@ mqtrait <- c("KernelWeight.mg.", "on6.64....", "MaltExtract...", "BarleyProtein.
              "WortProtein...", "S.T", "DP..ASBC.", "Alpha.amylase.20.DU.",
              "Beta.glucan.ppm.", "FAN.ppm.", "AdjunctQualityScore", "All_MaltQualityScore")
 agtraits   <- c("yield_kgha", "HD_JD")
-cor_traits <- c("NDVI", "PSRI", "FPC1_NDVI", "FPC1_PSRI", "FPC2_NDVI", "FPC2_PSRI",
-                "FPC3_NDVI", "FPC3_PSRI")
+cor_traits <- c("NDVI", "PSRI", "FPC1_NDVI", "FPC1_PSRI" )#, "FPC2_NDVI", "FPC2_PSRI",   "FPC3_NDVI", "FPC3_PSRI")
 load(file.path(base_path, "data/geno/WMB_master_geno.RData"))
 ```
 
